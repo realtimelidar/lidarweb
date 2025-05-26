@@ -16,6 +16,9 @@ export class Pointcloud {
         /* list of pointcloud ids */
         this.clouds = [];
 
+        this.bufferedPoints = [];
+        
+
         // this.updateT3Points();
     }
 
@@ -56,6 +59,8 @@ export class Pointcloud {
         
         if (this.nodes.has(key)) {
             this.points.set(key, points);
+
+            this.bufferedPoints.push(points);
 
             // const bb = this.computeBoundingBox3D(points);
             // const n = this.nodes.get(key);
@@ -98,16 +103,23 @@ export class Pointcloud {
             const geometry = new THREE.BufferGeometry();
 
             // all points
-            const pnts = Array.from(this.points.values()).flat();
+            // const pnts = Array.from(this.points.values()).flat();
 
-            const positions = new Float32Array(pnts.map(x => x.attrs.find(x => x.name == "Position3D").value).flat());
-            const rgba = new Uint8Array(pnts.map(x => x.attrs.find(x => x.name == "ColorRGB").value).map(inner => inner.map(x => x >> 8))/*.map(x => x.concat(255 << 8))*/.flat());//.map(x => 255.0 /* x >> 8 */));
-            const intensity = new Float32Array(pnts.map(x => x.attrs.find(x => x.name == "Intensity").value).flat())
+            // this.points.values() is "Array<NodePoints>"
+            // so array of array of points...
+        
+            const positions = new Float32Array(pnts.map(x => x.pBuff).flat());
+            const colors = new Uint8Array(pnts.map(x => x.cBuff).flat());
+
+            // Total number of points
+            // Each point has xyz
+            const pointCount = (positions.byteLength / positions.BYTES_PER_ELEMENT) / 3;
+
             const sizes = new Float32Array(new Array(pnts.length).fill(2.0));
 
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(rgba, 3, true));
-            geometry.setAttribute('intensity', new THREE.BufferAttribute(intensity, 1));
+            // geometry.setAttribute('intensity', new THREE.BufferAttribute(intensity, 1));
             geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
             geometry.computeBoundingBox();
@@ -119,6 +131,24 @@ export class Pointcloud {
                 scene.add(this.t3Points);
             }
         } else {
+            // We get buffered points from last update,
+            // then we add them to the geometry
+
+            const buffPointsCount = this.bufferedPoints.length;
+
+            const buffPositions = new Float32Array(buffPointsCount * 3);
+            const buffColors = new Uint8Array(buffPointsCount * 3);
+            const buffSizes = new Float32Array(buffPointsCount);
+
+            let copiedPoints = 0;
+            for (const buffPoint of this.bufferedPoints) {
+                buffPositions.set(buffPoint.pBuff, copiedPoints * 3);
+                buffColors.set(buffPoint.cBuff, copiedPoints * 3);
+                buffColors.set(2.0, copiedPoints);
+            }
+
+            this.geometry.attributes.position.array
+
             // all points
             const pnts = Array.from(this.points.values()).flat();
 
