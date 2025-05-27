@@ -8,14 +8,14 @@ import { Node, Pointcloud } from './pointcloud.js';
 const pointcloud = new Pointcloud();
 
 const t3points = new THREE.Points(pointcloud.geometry, pointcloud.material);
-t3points.frustumCulled = false;
+// t3points.frustumCulled = false;
 
 window.pcId = 0;
 
 // Initialize THREE
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000*1000);
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 1000*1000);
 
 window.scene = scene;
 
@@ -28,25 +28,6 @@ const controls = new OrbitControls(camera, renderer.domElement);
 scene.add(t3points);
 
 function sendCameraValues() {
-    const cam = camera;
-    cam.updateMatrixWorld(true);
-
-    const pM = cam.projectionMatrix;
-    const vM = cam.matrixWorldInverse;
-
-    const vec3 = new THREE.Vector3();
-    const camera_pos = vec3.setFromMatrixPosition(cam.matrixWorld).toArray();
-
-    vec3.set(0, 0, -1);
-    const camera_dir = vec3.applyQuaternion(cam.quaternion).normalize().toArray();
-    const camera_up = [0.0, 0.0, 1.0];
-    const fov_y = Math.PI / 4;
-    const z_near = Math.abs(new THREE.Vector3(0.0, 0.0, -1.0).applyMatrix4(cam.projectionMatrixInverse).z);
-    const z_far = Math.abs(new THREE.Vector3(0.0, 0.0, 1.0).applyMatrix4(cam.projectionMatrixInverse).z);
-
-    const window_size = [window.innerWidth, window.innerHeight];
-    const max_distance = 10.0;
-
     const a = {
         "Query": {
             "query": {
@@ -56,11 +37,11 @@ function sendCameraValues() {
                             "camera_pos": camera.getWorldPosition(new THREE.Vector3()).toArray(),
                             "camera_dir": camera.getWorldDirection(new THREE.Vector3()).toArray(),
                             "camera_up": camera.up.toArray(),
-                            "fov_y": fov_y,
-                            "z_near": cam.near, //z_near * 10, //11.190580082124141,//z_near ,//* 100,
-                            "z_far": cam.far, //z_far * 100,//11190580.082987662,//z_far ,//* 10,
-                            "window_size": window_size,
-                            "max_distance": max_distance
+                            "fov_y": Math.PI / 4,
+                            "z_near": camera.near, //z_near * 10, //11.190580082124141,//z_near ,//* 100,
+                            "z_far": camera.far, //z_far * 100,//11190580.082987662,//z_far ,//* 10,
+                            "window_size": [window.innerWidth, window.innerHeight],
+                            "max_distance": 10.0
                         }
                     }, "Full"
                 ]
@@ -91,13 +72,13 @@ function animate(timestamp) {
         cameraTimeTracker = timestamp;
     }
 
-    if (timestamp - geometryTimeTracker >= 2000 && pointcloud.needsRebuild) {
+    if (timestamp - geometryTimeTracker >= 200 && pointcloud.needsRebuild) {
         pointcloud.buildMergedGeometry();
         t3points.geometry = pointcloud.geometry;
 
         geometryTimeTracker = timestamp;
         document.getElementById("info").innerHTML = `${pointcloud.nodes.size} nodes`;
-        // console.log("Updated!")
+        console.log("Updated!")
     }
 
     if (timestamp - cameraTimeTracker >= 100) {
@@ -125,13 +106,20 @@ websocketWorker.onmessage = e => {
             let updateInfo = e.data.payload;
             const updatedNodeInfo = e.data.payload.node;
 
+            if (updatedNodeInfo.lod > 0) {
+                return;
+            }
+
             if (!updateInfo.points || updateInfo.points.length <= 0) {
                 return;
             }
 
-            // if (updatedNodeInfo.lod == 0) {
-            //     return;
-            // }
+            const updatedNodeId = Node.getNodeId({ pos: updatedNodeInfo.pos, lod: updatedNodeInfo.lod });
+
+            // TODO: Update
+            if (pointcloud.hasNode(updatedNodeId)) {
+                return;
+            }
 
             let node = new Node(
                 updatedNodeInfo.pos.x, updatedNodeInfo.pos.y, updatedNodeInfo.pos.z, updatedNodeInfo.lod,
@@ -154,8 +142,8 @@ websocketWorker.onmessage = e => {
         
             // Build visually the bounding box
             const bb3 = new THREE.Box3(new THREE.Vector3().fromArray(bb.min), new THREE.Vector3().fromArray(bb.max));
-            const b3h = new Box3Helper(bb3);
-            scene.add(b3h);
+            // const b3h = new Box3Helper(bb3);
+            // scene.add(b3h);
 
             // Set initial camera rotation same as lidarserv-viewer
             // const vPosition = new THREE.Vector3(360280.72611016943,4571987.929769906,324.67023094467004);
@@ -164,7 +152,7 @@ websocketWorker.onmessage = e => {
             // const target = vPosition.clone().add(vDirection);
 
             const focus = bb3.getCenter(new THREE.Vector3());
-            const vPosition = new THREE.Vector3(0.0, 0.0, 100).add(focus)
+            const vPosition = new THREE.Vector3(0.0, 0.0, 400).add(focus)
 
 
             camera.position.copy(vPosition);

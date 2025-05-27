@@ -81,12 +81,17 @@ const send = (message, isJson = true) => {
 const decoderWorker = new Worker("./decoder.js");
 decoderWorker.onmessage = e => {
     const msg = e.data;
-    if (msg.updateNumber >= _lastAck + 5) {
-        // send({
-        //     'ResultAck': {
-        //         'update_number': msg.updateNumber
-        //     }
-        // });
+    
+    if (!msg) {
+        return;
+    }
+
+    if (msg.updateNumber >= _lastAck) {
+        send({
+            'ResultAck': {
+                'update_number': msg.updateNumber
+            }
+        });
         _lastAck = msg.updateNumber;
     }
     postMessage(msg);

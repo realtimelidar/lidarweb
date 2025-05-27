@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { Box3Helper } from "./utils/Box3Helper.js"
 
 export class Node {
     static getNodeId(nodeInfo) {
@@ -89,19 +90,35 @@ export class Pointcloud {
         this.needsRebuild = false;
     }
 
+    hasNode(nodeId) {
+        return this.nodes.has(nodeId);
+    }
+
     addNode(node) {
         if (!this.nodes.has(node.id)) {
             this.nodes.set(node.id, node);
             this.needsRebuild = true;
+
+            const b3h = new Box3Helper(node.geometry.boundingBox);
+            scene.add(b3h);
+
+            this.b3h = b3h;
         }
     }
 
-    removeNode(nodeId) {
+    removeNode(nodeId, rebuild = true) {
         if (this.nodes.has(nodeId)) {
             const node = this.nodes.get(nodeId);
             node.dispose();
             this.nodes.delete(nodeId);
-            this.needsRebuild = true;
+
+            if (this.b3h) {
+                this.b3h.geometry.dispose();
+            }
+
+            if (rebuild) {
+                this.needsRebuild = true;
+            }
         }
     }
 

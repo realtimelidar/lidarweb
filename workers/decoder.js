@@ -17,6 +17,9 @@ onmessage = e => {
         console.log(encodedSz);
         console.log(messageLen);
         console.log(headerLen);
+
+        postMessage(null);
+        return;
     }
     
     const payload = new Uint8Array(u8data.subarray(headerLen+8));
