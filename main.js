@@ -6,7 +6,9 @@ import { Box3Helper } from "./utils/Box3Helper.js"
 import { Node, Pointcloud } from './pointcloud.js';
 
 const pointcloud = new Pointcloud();
+
 const t3points = new THREE.Points(pointcloud.geometry, pointcloud.material);
+t3points.frustumCulled = false;
 
 window.pcId = 0;
 
@@ -51,12 +53,12 @@ function sendCameraValues() {
                 "And": [
                     {
                         "ViewFrustum": {
-                            "camera_pos": camera_pos,
-                            "camera_dir": camera_dir,
-                            "camera_up": camera_up,
+                            "camera_pos": camera.getWorldPosition(new THREE.Vector3()).toArray(),
+                            "camera_dir": camera.getWorldDirection(new THREE.Vector3()).toArray(),
+                            "camera_up": camera.up.toArray(),
                             "fov_y": fov_y,
-                            "z_near": z_near * 10, //11.190580082124141,//z_near ,//* 100,
-                            "z_far": z_far * 100,//11190580.082987662,//z_far ,//* 10,
+                            "z_near": cam.near, //z_near * 10, //11.190580082124141,//z_near ,//* 100,
+                            "z_far": cam.far, //z_far * 100,//11190580.082987662,//z_far ,//* 10,
                             "window_size": window_size,
                             "max_distance": max_distance
                         }
@@ -89,7 +91,7 @@ function animate(timestamp) {
         cameraTimeTracker = timestamp;
     }
 
-    if (timestamp - geometryTimeTracker >= 2000) {
+    if (timestamp - geometryTimeTracker >= 2000 && pointcloud.needsRebuild) {
         pointcloud.buildMergedGeometry();
         t3points.geometry = pointcloud.geometry;
 
@@ -136,14 +138,14 @@ websocketWorker.onmessage = e => {
             );
 
             pointcloud.addNode(node);
-            console.log("Added node (" + node.id + ") to pointcloud");
+            // console.log("Added node (" + node.id + ") to pointcloud");
             break;
         case 'DeleteNode':
             const deletedNodeInfo = e.data.payload.node;
             let nodeId = Node.getNodeId(deletedNodeInfo);
 
             pointcloud.removeNode(nodeId);
-            console.log("Removed node (" + nodeId + ")");
+            // console.log("Removed node (" + nodeId + ")");
             break;
         case 'bb':
             const bb = e.data.p;
@@ -155,17 +157,31 @@ websocketWorker.onmessage = e => {
             scene.add(b3h);
 
             // Set initial camera rotation same as lidarserv-viewer
-            const vPosition = new THREE.Vector3(360256.0, 4571304.706493851, 791.2935061482602);
-            // const vDirection = new THREE.Vector3(0.0, 0.70710678118662, -0.7071067811864751).normalize();
+            // const vPosition = new THREE.Vector3(360280.72611016943,4571987.929769906,324.67023094467004);
+            // const vDirection = new THREE.Vector3(0.11402558543009306,0.3137649799207097,-0.9426291440660433).normalize();
 
             // const target = vPosition.clone().add(vDirection);
 
             const focus = bb3.getCenter(new THREE.Vector3());
+            const vPosition = new THREE.Vector3(0.0, 0.0, 100).add(focus)
 
 
             camera.position.copy(vPosition);
             controls.target.copy(focus);
             controls.update();
+            // setTimeout(() => {
+            //     const vPosition = new THREE.Vector3(360280.72611016943,4571987.929769906,324.67023094467004);
+            //     const vDirection = new THREE.Vector3(0.11402558543009306,0.3137649799207097,-0.9426291440660433).normalize();
+
+            //     const target = vPosition.clone().add(vDirection);
+
+            //     // const focus = bb3.getCenter(new THREE.Vector3());
+
+
+            //     camera.position.copy(vPosition);
+            //     controls.target.copy(target);
+            //     controls.update();
+            // }, 2000)
 
             // setInterval(() => {
             //     console.log("Updating...");

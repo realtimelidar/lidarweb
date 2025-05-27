@@ -44,10 +44,6 @@ onmessage = e => {
 
         dv = new DataView(payload.buffer, 16);
 
-        if (lod > 0) {
-            console.log(new Uint8Array(dv.buffer));
-        }
-
         let pByteOffset = 0;
 
         // Version must be 1
@@ -77,6 +73,19 @@ onmessage = e => {
         // so we cast to Number since its easier to work with
         const pointCount = Number(dv.getBigUint64(pByteOffset, littleEndian));
         pByteOffset += 8;
+
+        if (pointCount <= 0) {
+            result.t = 'DeleteNode';
+            result.payload = {
+                "node": {
+                    lod,
+                    pos,
+                },
+            };
+
+            postMessage(result);
+            return;
+        }
 
         const attrCount = dv.getUint8(pByteOffset);
         pByteOffset++;

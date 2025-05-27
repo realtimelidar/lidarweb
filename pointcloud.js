@@ -25,8 +25,6 @@ export class Node {
 
         this.geometry.computeBoundingBox();
         this.geometry.computeBoundingSphere();
-
-        console.log(this.geometry);
     }
 
     dispose() {
@@ -85,12 +83,16 @@ export class Pointcloud {
 
         /* Merged geometry of all inner nodes */
         /* Initially set to a dummy geometr */
-        this.geometry = new THREE.BufferGeometry();
+        this.dummyGeometry = new THREE.BufferGeometry();
+        this.geometry = this.dummyGeometry;
+
+        this.needsRebuild = false;
     }
 
     addNode(node) {
         if (!this.nodes.has(node.id)) {
             this.nodes.set(node.id, node);
+            this.needsRebuild = true;
         }
     }
 
@@ -99,15 +101,29 @@ export class Pointcloud {
             const node = this.nodes.get(nodeId);
             node.dispose();
             this.nodes.delete(nodeId);
+            this.needsRebuild = true;
         }
     }
 
+    removeAllNodes() {
+        for (const node of this.nodes.values()) {
+            node.dispose();
+        }
+        this.nodes.clear();
+        this.needsRebuild = true;
+    }
+
     buildMergedGeometry() {
+        if (!this.needsRebuild) {
+            return;
+        }
+
         if (this.geometry) {
             this.geometry.dispose();
         }
 
         if (this.nodes.size <= 0) {
+            this.geometry = this.dummyGeometry;
             return;
         }
 
@@ -121,6 +137,8 @@ export class Pointcloud {
         console.log("*debug!* " + this.geometry.attributes.position.array.length + " positions")
         console.log("*debug!* " + this.geometry.attributes.color.array.length + " colors")
         console.log("*debug!* " + this.geometry.attributes.lod.array.length + " lods")
+
+        this.needsRebuild = false;
     }
     
 }
