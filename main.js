@@ -96,6 +96,7 @@ function animate(timestamp) {
         t3points.geometry = pointcloud.geometry;
 
         geometryTimeTracker = timestamp;
+        document.getElementById("info").innerHTML = `${pointcloud.nodes.size} nodes`;
         // console.log("Updated!")
     }
 
