@@ -5,10 +5,20 @@ onmessage = e => {
     let dv = new DataView(e.data);
     const encodedSz = dv.getBigUint64(0, true);
 
-    const messageLen = Number(encodedSz & 0xffffffn);
+    const messageLen = Number(encodedSz & 0xffffffffn);
     const headerLen = Number(encodedSz >> 32n);
 
-    const headerDecodedU8 = JSON.parse(new TextDecoder("utf-8").decode(new Uint8Array(u8data.subarray(8, headerLen+8)).buffer));
+    let headerDecodedU8;
+    try {
+        headerDecodedU8 = JSON.parse(new TextDecoder("utf-8").decode(new Uint8Array(u8data.subarray(8, headerLen+8)).buffer));
+    } catch (e) {
+        console.error("Failed to parse header");
+        console.log(new Uint8Array(u8data.subarray(8, headerLen+8)));
+        console.log(encodedSz);
+        console.log(messageLen);
+        console.log(headerLen);
+    }
+    
     const payload = new Uint8Array(u8data.subarray(headerLen+8));
 
     let result = {
