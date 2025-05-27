@@ -1,222 +1,126 @@
 import * as THREE from "three";
-import { vertexColor } from "three/tsl";
-// import {PointCloudMaterial} from "./materials/PointCloudMaterial.js";
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+
+export class Node {
+    static getNodeId(nodeInfo) {
+        return `${nodeInfo.pos.x}_${nodeInfo.pos.y}_${nodeInfo.pos.z}_${nodeInfo.lod}`;
+    }
+
+    constructor(x, y, z, lod, positionBuffer, colorBuffer) {
+        this.id = Node.getNodeId({ pos: { x, y, z }, lod: lod });
+
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.lod = lod;
+
+        // Each point is represented by 3 float32 = 4 * 3 = 12 position bytes per point
+        this.pointCount = positionBuffer.byteLength / 12;
+
+        this.geometry = new THREE.BufferGeometry();
+
+        this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positionBuffer), 3));
+        this.geometry.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(colorBuffer), 3, true));
+        this.geometry.setAttribute('lod', new THREE.BufferAttribute(new Uint8Array(Array(this.pointCount).fill(this.lod)), 1));
+
+        this.geometry.computeBoundingBox();
+        this.geometry.computeBoundingSphere();
+
+        console.log(this.geometry);
+    }
+
+    dispose() {
+        if (this.geometry) {
+            this.geometry.dispose();
+        }
+    }
+}
 
 export class Pointcloud {
     constructor() {
-        /* node id -> node */
+        /* node id -> Node */
+        /* What nodes are loaded into this pointcloud? */
         this.nodes = new Map();
 
-        /* node id -> pointcloud id */
-        this.nodes2cloud = new Map();
+        /* Material used to render this pointcloud's nodes */
+        this.material = new THREE.ShaderMaterial({
+            depthTest: true,
+            depthWrite: false,
 
-        /* node id -> points array */
-        this.points = new Map();
+            uniforms: {
+                size: { value: 1.0 },
+                scale: { value: window.innerHeight }
+            },
 
-        /* list of pointcloud ids */
-        this.clouds = [];
+            vertexShader: `
+                uniform float scale;
+                uniform float size;
 
-        this.bufferedPoints = [];
-        
+                attribute vec3 color;
+                attribute float lod;
 
-        // this.updateT3Points();
+                varying vec3 vColor;
+
+                void main() {
+                    vColor = color;
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+
+                    // float size = 2.0;
+                    // gl_PointSize = size * (300.0 / -mvPosition.z); // optional size attenuation
+
+                    gl_PointSize = size * (scale / -mvPosition.z) * pow(0.5, lod);
+
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            fragmentShader: `
+                precision mediump float;
+                varying vec3 vColor;
+
+                void main() {
+                    gl_FragColor = vec4(vColor, 1.0);
+                }
+            `,
+        });
+
+        /* Merged geometry of all inner nodes */
+        /* Initially set to a dummy geometr */
+        this.geometry = new THREE.BufferGeometry();
     }
 
-    newPointcloud() {
-        let id = 0;
-        while (this.clouds.includes(id)) {
-            id++;
-        }
-
-        this.clouds.push(id);
-        return id;
-    }
-
-    getNodeId(node) {
-        return JSON.stringify({ lod: node.lod, pos: node.pos });
-    }
-
-    addNodeToPointcloud(node, pointcloudId) {
-        const key = this.getNodeId(node);
-
-        if (!this.nodes2cloud.has(key)) {
-            this.nodes2cloud.set(key, pointcloudId)
-        }
-        if (!this.nodes.has(key)) {
-            this.nodes.set(key, node);
-        }
-
-        return key;
-    }
-
-    doesNodeExist(node) {
-        const key = this.getNodeId(node);
-        return this.nodes.has(key);
-    }
-
-    addPointsToNode(points, node) {
-        const key = this.getNodeId(node);
-        
-        if (this.nodes.has(key)) {
-            this.points.set(key, points);
-
-            this.bufferedPoints.push(points);
-
-            // const bb = this.computeBoundingBox3D(points);
-            // const n = this.nodes.get(key);
-            // n["boundingBox"] = bb;
-            this.nodes.set(key, node);
-
-            // this.updateT3Points();
+    addNode(node) {
+        if (!this.nodes.has(node.id)) {
+            this.nodes.set(node.id, node);
         }
     }
 
-    updateT3Points() {
-        if (!this.material) {
-            this.material = new THREE.ShaderMaterial({
-                vertexShader: `
-                    attribute float size;
-                    attribute vec3 color;
-                    varying vec3 vColor;
-
-                    void main() {
-                        vColor = color;
-                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-                        gl_PointSize = size * (300.0 / -mvPosition.z); // optional size attenuation
-                        gl_Position = projectionMatrix * mvPosition;
-                    }
-                `,
-                fragmentShader: `
-                    precision mediump float;
-                    varying vec3 vColor;
-
-                    void main() {
-                        gl_FragColor = vec4(vColor, 1.0);
-                    }
-                `,
-            });
-        }
-
-        if (!this.t3Points) {
-            // This is what is going to be rendered,
-            // the representation of the pointcloud's points in THREE terms
-            const geometry = new THREE.BufferGeometry();
-
-            // all points
-            // const pnts = Array.from(this.points.values()).flat();
-
-            // this.points.values() is "Array<NodePoints>"
-            // so array of array of points...
-        
-            const positions = new Float32Array(pnts.map(x => x.pBuff).flat());
-            const colors = new Uint8Array(pnts.map(x => x.cBuff).flat());
-
-            // Total number of points
-            // Each point has xyz
-            const pointCount = (positions.byteLength / positions.BYTES_PER_ELEMENT) / 3;
-
-            const sizes = new Float32Array(new Array(pnts.length).fill(2.0));
-
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(rgba, 3, true));
-            // geometry.setAttribute('intensity', new THREE.BufferAttribute(intensity, 1));
-            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-            geometry.computeBoundingBox();
-
-            this.geometry = geometry;
-
-            if (!this.t3Points) {
-                this.t3Points = new THREE.Points(this.geometry, this.material);
-                scene.add(this.t3Points);
-            }
-        } else {
-            // We get buffered points from last update,
-            // then we add them to the geometry
-
-            const buffPointsCount = this.bufferedPoints.length;
-
-            const buffPositions = new Float32Array(buffPointsCount * 3);
-            const buffColors = new Uint8Array(buffPointsCount * 3);
-            const buffSizes = new Float32Array(buffPointsCount);
-
-            let copiedPoints = 0;
-            for (const buffPoint of this.bufferedPoints) {
-                buffPositions.set(buffPoint.pBuff, copiedPoints * 3);
-                buffColors.set(buffPoint.cBuff, copiedPoints * 3);
-                buffColors.set(2.0, copiedPoints);
-            }
-
-            this.geometry.attributes.position.array
-
-            // all points
-            const pnts = Array.from(this.points.values()).flat();
-
-            const positions = new Float32Array(pnts.map(x => x.attrs.find(x => x.name == "Position3D").value).flat());
-            const rgba = new Uint8Array(pnts.map(x => x.attrs.find(x => x.name == "ColorRGB").value).map(inner => inner.map(x => x >> 8))/*.map(x => x.concat(255 << 8))*/.flat());//.map(x => 255.0 /* x >> 8 */));
-            const intensity = new Float32Array(pnts.map(x => x.attrs.find(x => x.name == "Intensity").value).flat())
-            const sizes = new Float32Array(new Array(pnts.length).fill(2.0));
-
-            this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            this.geometry.setAttribute('color', new THREE.BufferAttribute(rgba, 3, true));
-            this.geometry.setAttribute('intensity', new THREE.BufferAttribute(intensity, 1));
-            this.geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-            this.geometry.computeBoundingBox();
+    removeNode(nodeId) {
+        if (this.nodes.has(nodeId)) {
+            const node = this.nodes.get(nodeId);
+            node.dispose();
+            this.nodes.delete(nodeId);
         }
     }
 
-    removeNode(node) {
-        const key = this.getNodeId(node);
-
-        if (this.nodes.has(key)) {
-            this.nodes.remove(key);
+    buildMergedGeometry() {
+        if (this.geometry) {
+            this.geometry.dispose();
         }
 
-        if (this.points.has(key)) {
-            this.points.remove(key);
+        if (this.nodes.size <= 0) {
+            return;
         }
 
-        if (this.nodes2cloud.has(key)) {
-            this.nodes2cloud.remove(key);
-        }
+        const geometries = Array.from(this.nodes.values()).map(x => x.geometry);
+
+        this.geometry = BufferGeometryUtils.mergeGeometries(geometries, false);
+
+        this.geometry.computeBoundingBox();
+        this.geometry.computeBoundingSphere();
+
+        console.log("*debug!* " + this.geometry.attributes.position.array.length + " positions")
+        console.log("*debug!* " + this.geometry.attributes.color.array.length + " colors")
+        console.log("*debug!* " + this.geometry.attributes.lod.array.length + " lods")
     }
-
-    getNode(nodeId) {
-        return this.nodes.get(nodeId);
-    }
-
-    getNodePoints(nodeId) {
-        const key = nodeId; //this.getNodeId(node);
-        
-        if (this.points.has(key)) {
-            return this.points.get(key);
-        }
-
-        return [];
-    }
-
-    computeBoundingBox3D(points) {
-        const [x0, y0, z0] = points[0].attrs.find(x => x.name == "Position3D").value;
-
-        let minX = x0, minY = y0, minZ = z0;
-        let maxX = x0, maxY = y0, maxZ = z0;
-
-        for (let i = 1; i < points.length; i++) {
-            const [x, y, z] = points[i].attrs.find(x => x.name == "Position3D").value;
-
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (z < minZ) minZ = z;
-
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
-            if (z > maxZ) maxZ = z;
-        }
-
-        return [
-            [minX, minY, minZ],
-            [maxX, maxY, maxZ]
-        ];
-    }
+    
 }

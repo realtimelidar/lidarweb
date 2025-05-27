@@ -3,9 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 
 import { Box3Helper } from "./utils/Box3Helper.js"
-import { Pointcloud } from './pointcloud.js';
+import { Node, Pointcloud } from './pointcloud.js';
 
 const pointcloud = new Pointcloud();
+const t3points = new THREE.Points(pointcloud.geometry, pointcloud.material);
 
 window.pcId = 0;
 
@@ -22,12 +23,92 @@ document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 
-// Render loop
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
+scene.add(t3points);
+
+function sendCameraValues() {
+    const cam = camera;
+    cam.updateMatrixWorld(true);
+
+    const pM = cam.projectionMatrix;
+    const vM = cam.matrixWorldInverse;
+
+    const vec3 = new THREE.Vector3();
+    const camera_pos = vec3.setFromMatrixPosition(cam.matrixWorld).toArray();
+
+    vec3.set(0, 0, -1);
+    const camera_dir = vec3.applyQuaternion(cam.quaternion).normalize().toArray();
+    const camera_up = [0.0, 0.0, 1.0];
+    const fov_y = Math.PI / 4;
+    const z_near = Math.abs(new THREE.Vector3(0.0, 0.0, -1.0).applyMatrix4(cam.projectionMatrixInverse).z);
+    const z_far = Math.abs(new THREE.Vector3(0.0, 0.0, 1.0).applyMatrix4(cam.projectionMatrixInverse).z);
+
+    const window_size = [window.innerWidth, window.innerHeight];
+    const max_distance = 10.0;
+
+    const a = {
+        "Query": {
+            "query": {
+                "And": [
+                    {
+                        "ViewFrustum": {
+                            "camera_pos": camera_pos,
+                            "camera_dir": camera_dir,
+                            "camera_up": camera_up,
+                            "fov_y": fov_y,
+                            "z_near": z_near * 10, //11.190580082124141,//z_near ,//* 100,
+                            "z_far": z_far * 100,//11190580.082987662,//z_far ,//* 10,
+                            "window_size": window_size,
+                            "max_distance": max_distance
+                        }
+                    }, "Full"
+                ]
+            },
+            "config": {
+                "one_shot": false,
+                "point_filtering": true
+            }
+        }
+    };
+    const b = '{"Query":{"query":{"And":[{"ViewFrustum":{"camera_pos":[360320.0,4571304.706493851,791.2935061482602],"camera_dir":[0.0,0.70710678118662,-0.7071067811864751],"camera_up":[0.0,0.0,1.0],"fov_y":0.7853981633974483,"z_near":11.190580082124141,"z_far":11190580.082987662,"window_size":[500.0,500.0],"max_distance":10.0}},"Full"]},"config":{"one_shot":false,"point_filtering":true}}}';
+    // console.log(JSON.stringify(a));
+    websocketWorker.postMessage({ t: "send", msg: a, isJson: true });
+    // WS.send(a);
 }
+
+// Render loop
+let geometryTimeTracker;
+let cameraTimeTracker;
+
+function animate(timestamp) {
+
+    if (geometryTimeTracker == undefined) {
+        geometryTimeTracker = timestamp;
+    }
+
+    if (cameraTimeTracker == undefined) {
+        cameraTimeTracker = timestamp;
+    }
+
+    if (timestamp - geometryTimeTracker >= 2000) {
+        pointcloud.buildMergedGeometry();
+        t3points.geometry = pointcloud.geometry;
+
+        geometryTimeTracker = timestamp;
+        // console.log("Updated!")
+    }
+
+    if (timestamp - cameraTimeTracker >= 100) {
+        sendCameraValues();
+        cameraTimeTracker = timestamp;
+        // console.log("Camera sent!")
+    }
+
+    controls.update();
+
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+}
+
 animate();
 
 // Initialize Websocket connection 
@@ -38,26 +119,31 @@ websocketWorker.postMessage({ t: "start", url: "ws://127.0.0.1:3000" });
 websocketWorker.onmessage = e => {
     switch (e.data.t) {
         case 'UpdateNode':
-            let nodeId = null;
-            const updateInfo = e.data.payload;
-            console.log(updateInfo);
+            let updateInfo = e.data.payload;
+            const updatedNodeInfo = e.data.payload.node;
 
             if (!updateInfo.points || updateInfo.points.length <= 0) {
                 return;
             }
 
-            if (!pointcloud.doesNodeExist(updateInfo.node)) {
-                // Insert
-                // console.log("Received new node!");
+            // if (updatedNodeInfo.lod == 0) {
+            //     return;
+            // }
 
-                nodeId = pointcloud.addNodeToPointcloud(updateInfo.node, pcId);
-                console.log("Added node (" + nodeId + ") to pointcloud (" + pcId + ")");
-            }
+            let node = new Node(
+                updatedNodeInfo.pos.x, updatedNodeInfo.pos.y, updatedNodeInfo.pos.z, updatedNodeInfo.lod,
+                updateInfo.points.pBuff, updateInfo.points.cBuff
+            );
 
-            // Insert/Update
-            pointcloud.addPointsToNode(updateInfo.points, updateInfo.node);
-            // pointcloud.updateT3Points();
-            // console.log("Set node (" + nodeId + ") points (" + updateInfo.points.length + ")");
+            pointcloud.addNode(node);
+            console.log("Added node (" + node.id + ") to pointcloud");
+            break;
+        case 'DeleteNode':
+            const deletedNodeInfo = e.data.payload.node;
+            let nodeId = Node.getNodeId(deletedNodeInfo);
+
+            pointcloud.removeNode(nodeId);
+            console.log("Removed node (" + nodeId + ")");
             break;
         case 'bb':
             const bb = e.data.p;
@@ -92,55 +178,6 @@ websocketWorker.onmessage = e => {
             // });
 
             // Send one time this query to get some points on screen
-            setInterval(() => {
-                const cam = camera;
-                cam.updateMatrixWorld(true);
-
-                const pM = cam.projectionMatrix;
-                const vM = cam.matrixWorldInverse;
-
-                const vec3 = new THREE.Vector3();
-                const camera_pos = vec3.setFromMatrixPosition(cam.matrixWorld).toArray();
-
-                vec3.set(0, 0, -1);
-                const camera_dir = vec3.applyQuaternion(cam.quaternion).normalize().toArray();
-                const camera_up = [0.0, 0.0, 1.0];
-                const fov_y = Math.PI / 4;
-                const z_near = Math.abs(new THREE.Vector3(0.0, 0.0, -1.0).applyMatrix4(cam.projectionMatrixInverse).z);
-                const z_far = Math.abs(new THREE.Vector3(0.0, 0.0, 1.0).applyMatrix4(cam.projectionMatrixInverse).z);
-
-                const window_size = [window.innerWidth, window.innerHeight];
-                const max_distance = 10.0;
-
-                const a = {
-                    "Query": {
-                        "query": {
-                            "And": [
-                                {
-                                    "ViewFrustum": {
-                                        "camera_pos": camera_pos,
-                                        "camera_dir": camera_dir,
-                                        "camera_up": camera_up,
-                                        "fov_y": fov_y,
-                                        "z_near": z_near, //11.190580082124141,//z_near ,//* 100,
-                                        "z_far": z_far,//11190580.082987662,//z_far ,//* 10,
-                                        "window_size": window_size,
-                                        "max_distance": max_distance
-                                    }
-                                }, "Full"
-                            ]
-                        },
-                        "config": {
-                            "one_shot": false,
-                            "point_filtering": true
-                        }
-                    }
-                };
-                const b = '{"Query":{"query":{"And":[{"ViewFrustum":{"camera_pos":[360320.0,4571304.706493851,791.2935061482602],"camera_dir":[0.0,0.70710678118662,-0.7071067811864751],"camera_up":[0.0,0.0,1.0],"fov_y":0.7853981633974483,"z_near":11.190580082124141,"z_far":11190580.082987662,"window_size":[500.0,500.0],"max_distance":10.0}},"Full"]},"config":{"one_shot":false,"point_filtering":true}}}';
-                // console.log(JSON.stringify(a));
-                websocketWorker.postMessage({ t: "send", msg: a, isJson: true });
-                // WS.send(a);
-            }, 1000);
             break;
     }
 }

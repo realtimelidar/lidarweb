@@ -35,7 +35,7 @@ importScripts("../libs/cbor/cbor.js");
 let _connection = null;
 let _ready = false;
 
-let _debug = true;
+let _debug = false;
 
 /*
     0 = Waiting magic number
@@ -87,6 +87,7 @@ decoderWorker.onmessage = e => {
                 'update_number': msg.updateNumber
             }
         });
+        _lastAck = msg.updateNumber;
     }
     postMessage(msg);
 }

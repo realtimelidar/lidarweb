@@ -21,6 +21,11 @@ onmessage = e => {
         const pos = headerDecodedU8["Node"]["node"]["pos"];
         const updateNumber= headerDecodedU8["Node"]["update_number"];
 
+        // if (lod <= 0) {
+        //     postMessage(result);
+        //     return;
+        // }
+
         // Do ack
         result.updateNumber = updateNumber;
 
@@ -38,6 +43,11 @@ onmessage = e => {
         }
 
         dv = new DataView(payload.buffer, 16);
+
+        if (lod > 0) {
+            console.log(new Uint8Array(dv.buffer));
+        }
+
         let pByteOffset = 0;
 
         // Version must be 1
@@ -73,7 +83,19 @@ onmessage = e => {
 
         // Start reading attributes
         // attr: { "name: "xxx", "type": xxx, "length": xxx }
-        const attrs = [];
+        // const attrs = [];
+
+        // Byte size of each point
+        let pointSize = 0;
+
+        // Byte offset of Position3D attribute in each point
+        let positionOffset = 0;
+
+        // Byte offset of ColorRGB attribute in each point
+        let colorOffset = 0;
+
+        // Current byte offset in attributes
+        let attrOffset = 0;
 
         for (let i = 0; i < attrCount; i++) {
             const szName = dv.getUint8(pByteOffset);
@@ -85,14 +107,24 @@ onmessage = e => {
             const length = Number(dv.getBigUint64(pByteOffset, littleEndian));
             pByteOffset += 8;
 
-            const type = dv.getUint8(pByteOffset);
+            // const type = dv.getUint8(pByteOffset);
             pByteOffset++;
 
-            attrs.push({
-                name,
-                type,
-                length
-            });
+            pointSize += length;
+
+            if (name == "Position3D") {
+                positionOffset = attrOffset;
+            } else if (name == "ColorRGB") {
+                colorOffset = attrOffset;
+            }
+
+            attrOffset += length;
+
+            // attrs.push({
+            //     name,
+            //     type,
+            //     length
+            // });
         }
 
         // At this point we have parsed all the attributes
@@ -102,91 +134,24 @@ onmessage = e => {
         // Start reading points
         // We will only parse the following attributes:
         // Position3D, ColorRGB
-        const points = [];
-
         const pBuff = new ArrayBuffer(pointCount * 3 * 4);
         const cBuff = new ArrayBuffer(pointCount * 3);
 
         const positions = new Float32Array(pBuff);
         const colors = new Uint8Array(cBuff);
 
-        for (let i = 0; i < pointCount * attrCount; i++) {
-            const attr = attrs[i % attrCount];
-            const pnt = (i / attrCount) >> 0;
+        // For each point, get its position and color
+        for (let i = 0; i < pointCount; i++) {
+            let ppOffset = pByteOffset + i * pointSize + positionOffset;
+            let pcOffset = pByteOffset + i * pointSize + colorOffset;
 
-            switch (attr.name) {
-                case 'Position3D':
-                    positions[pnt * 3] = dv.getFloat64(pByteOffset, littleEndian);
-                    positions[pnt * 3 + 1] = dv.getFloat64(pByteOffset + 1 * 8, littleEndian);
-                    positions[pnt * 3 + 2] = dv.getFloat64(pByteOffset + 2 * 8, littleEndian);
+            positions[i * 3] = dv.getFloat64(ppOffset, littleEndian);
+            positions[i * 3 + 1] = dv.getFloat64(ppOffset + 1 * 8, littleEndian);
+            positions[i * 3 + 2] = dv.getFloat64(ppOffset + 2 * 8, littleEndian);
 
-                    // pByteOffset += 3 * 8;
-                    break;
-                case 'ColorRGB':
-                    colors[pnt * 3] = dv.getUint16(pByteOffset, littleEndian) >> 8;
-                    colors[pnt * 3 + 1] = dv.getUint16(pByteOffset + 1 * 2, littleEndian) >> 8;
-                    colors[pnt * 3 + 2] = dv.getUint16(pByteOffset + 2 * 2, littleEndian) >> 8;
-
-                    // pByteOffset += 3 * 2;
-                    break;
-            }
-
-            switch (attr.type) {
-                case 0:
-                    pByteOffset++;
-                    break;
-                case 1:
-                    pByteOffset++;
-                    break;
-                case 2:
-                    pByteOffset += 2;
-                    break;
-                case 3:
-                    pByteOffset += 2;
-                    break;
-                case 4:
-                    pByteOffset += 4;
-                    break;
-                case 5:
-                    pByteOffset += 4;
-                    break;
-                case 6:
-                    pByteOffset += 8;
-                    break;
-                case 7:
-                    pByteOffset += 8;
-                    break;
-                case 8:
-                    pByteOffset += 4;
-                    break;
-                case 9:
-                    pByteOffset += 8;
-                    break;
-                case 10:
-                    pByteOffset += 3;
-                    break;
-                case 11:
-                    pByteOffset += 3 * 2;
-                    break;
-                case 12:
-                    pByteOffset += 3 * 4;
-                    break;
-                case 13:
-                    pByteOffset += 3 * 4;
-                    break;
-                case 14:
-                    pByteOffset += 3 * 8;
-                    break;
-                case 15:
-                    pByteOffset += 4;
-                    break;
-                case 16:
-                    pByteOffset += length;
-                    break;
-                default:
-                    console.error("Unsupported attribute type " + type)
-
-            }
+            colors[i * 3] = dv.getUint16(pcOffset, littleEndian) >> 8;
+            colors[i * 3 + 1] = dv.getUint16(pcOffset + 1 * 2, littleEndian) >> 8;
+            colors[i * 3 + 2] = dv.getUint16(pcOffset + 2 * 2, littleEndian) >> 8;
         }
 
         result.t = 'UpdateNode';
