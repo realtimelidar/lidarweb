@@ -48,15 +48,21 @@ let _protocolVersion = 4;
 
 let _lastAck = 0;
 
+let _dataLen = 0;
+let _recvBytes = 0;
+let _readingFrag = false;
+let _buffer;
+let _typed;
+
 const log = msg => {
     if (_debug) {
         console.log("[websocket] " + msg);
     }
 };
 
-const send = (message, isJson = true) => {
-    if (!_ready) {
-        console.error("[send] not yet ready!");
+const send = (message, isJson = true, ignoreReady = false) => {
+    if (!ignoreReady && !_ready) {
+        console.error("[send] not ready yet!");
         return;
     }
 
@@ -86,14 +92,14 @@ decoderWorker.onmessage = e => {
         return;
     }
 
-    if (msg.updateNumber >= _lastAck) {
-        send({
-            'ResultAck': {
-                'update_number': msg.updateNumber
-            }
-        });
-        _lastAck = msg.updateNumber;
-    }
+    // if (msg.updateNumber >= _lastAck) {
+    //     send({
+    //         'ResultAck': {
+    //             'update_number': msg.updateNumber
+    //         }
+    //     });
+    //     _lastAck = msg.updateNumber;
+    // }
     postMessage(msg);
 }
 
@@ -106,8 +112,6 @@ onmessage = e => {
             _connection.binaryType = "arraybuffer";
 
             _connection.addEventListener("open", _ => {
-                _ready = true;
-
                 log("opened websocket connection");
 
                 // send back magic number
@@ -131,7 +135,7 @@ onmessage = e => {
                         _state = 1;
 
                         // send hello message
-                        send({ 'Hello': { 'protocol_version': _protocolVersion }}, false);
+                        send({ 'Hello': { 'protocol_version': _protocolVersion }}, false, true);
                     } else if (_state == 1) {
                         const body = new Uint8Array(u8data.subarray(8)).buffer;
                         const decoded = CBOR.decode(body);
@@ -144,7 +148,8 @@ onmessage = e => {
                                 _state = 2;
 
                                 // tell the server that we are a viewer, that will query points.
-                                send({ 'ConnectionMode': { 'device': 'Viewer' }}, false);
+                                send({ 'ConnectionMode': { 'device': 'Viewer' }}, false, true);
+                                _ready = true;
                             }
                         }
                     } else if (_state == 2) {
@@ -166,6 +171,40 @@ onmessage = e => {
                             // WS.call('InitialBoundingBox', currentBoundingBox);
                         }
                     } else if (_state == 3) {
+                        // Read length of message
+                        const n = event.data.byteLength;
+                        const dv = new DataView(u8data.buffer);
+                        const encodedSz = dv.getBigUint64(0, true);
+                        const messageLen = Number(encodedSz & 0xffffffffn);
+
+                        console.log(u8data);
+
+                        // Setup logic for reading fragmentation
+                        if (messageLen > n && !_readingFrag) {
+                            console.log("Start receiving frag message (" + messageLen + ")");
+
+                            _readingFrag = true;
+                            _dataLen = messageLen;
+                            _recvBytes = 0;
+
+                            _buffer = new ArrayBuffer(messageLen);
+                            _typed = new Uint8Array(_buffer);
+                        }
+
+                        if (_readingFrag) {
+                            _typed.set(u8data, _recvBytes);
+                            _recvBytes += n;
+
+                            console.log("Partial message " + n + " bytes (" + _recvBytes + "/" + _dataLen + ")")
+
+                            if (_dataLen == _recvBytes) {
+                                _readingFrag = false;
+                                decoderWorker.postMessage(_buffer, [_buffer]);
+                            }
+
+                            return;
+                        }
+
                         decoderWorker.postMessage(u8data.buffer, [u8data.buffer]);
                     }
                 }

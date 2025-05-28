@@ -61,8 +61,12 @@ function sendCameraValues() {
 // Render loop
 let geometryTimeTracker;
 let cameraTimeTracker;
+let start;
 
 function animate(timestamp) {
+    if (start == undefined) {
+        start = timestamp;
+    }
 
     if (geometryTimeTracker == undefined) {
         geometryTimeTracker = timestamp;
@@ -72,7 +76,7 @@ function animate(timestamp) {
         cameraTimeTracker = timestamp;
     }
 
-    if (timestamp - geometryTimeTracker >= 200 && pointcloud.needsRebuild) {
+    if (timestamp - start > 1000 && timestamp - geometryTimeTracker >= 200 && pointcloud.needsRebuild) {
         pointcloud.buildMergedGeometry();
         t3points.geometry = pointcloud.geometry;
 
