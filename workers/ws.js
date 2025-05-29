@@ -92,6 +92,7 @@ decoderWorker.onmessage = e => {
         return;
     }
 
+    _lastAck = msg.updateNumber;
     // if (msg.updateNumber >= _lastAck) {
     //     send({
     //         'ResultAck': {
@@ -113,6 +114,14 @@ onmessage = e => {
 
             _connection.addEventListener("open", _ => {
                 log("opened websocket connection");
+
+                setInterval(() => {
+                    send({
+                        'ResultAck': {
+                            'update_number': _lastAck
+                        }
+                    });
+                }, 10);
 
                 // send back magic number
                 _connection.send(new Uint8Array(_magicNumber));
@@ -171,34 +180,42 @@ onmessage = e => {
                             // WS.call('InitialBoundingBox', currentBoundingBox);
                         }
                     } else if (_state == 3) {
-                        // Read length of message
+                        // console.log(u8data);
                         const n = event.data.byteLength;
-                        const dv = new DataView(u8data.buffer);
-                        const encodedSz = dv.getBigUint64(0, true);
-                        const messageLen = Number(encodedSz & 0xffffffffn);
-
-                        console.log(u8data);
 
                         // Setup logic for reading fragmentation
-                        if (messageLen > n && !_readingFrag) {
-                            console.log("Start receiving frag message (" + messageLen + ")");
+                        if (!_readingFrag) {
+                            // Read length of message
+                            const dv = new DataView(u8data.buffer);
+                            const encodedSz = dv.getBigUint64(0, true);
+                            const messageLen = Number(encodedSz & 0xffffffffn);
 
-                            _readingFrag = true;
-                            _dataLen = messageLen;
-                            _recvBytes = 0;
+                            if (messageLen > n) {
+                                // console.log("Start receiving frag message (" + messageLen + ")");
 
-                            _buffer = new ArrayBuffer(messageLen);
-                            _typed = new Uint8Array(_buffer);
+                                _readingFrag = true;
+                                _dataLen = messageLen;
+                                _recvBytes = 0;
+
+                                _buffer = new ArrayBuffer(messageLen);
+                                _typed = new Uint8Array(_buffer);
+                            }
                         }
 
                         if (_readingFrag) {
-                            _typed.set(u8data, _recvBytes);
-                            _recvBytes += n;
+                            // console.log("trying to put " + u8data.byteLength + " at offset " + _recvBytes + " in buffer of " + _typed.byteLength + ", message of " + _dataLen + " bytes")
+                            if (u8data.byteLength + _recvBytes <= _dataLen) {
+                                _typed.set(u8data, _recvBytes);
+                                _recvBytes += n;
+                            }
 
-                            console.log("Partial message " + n + " bytes (" + _recvBytes + "/" + _dataLen + ")")
+                            // console.log("Partial message " + n + " bytes (" + _recvBytes + "/" + _dataLen + ")")
+
+                            // console.log(_typed);
 
                             if (_dataLen == _recvBytes) {
                                 _readingFrag = false;
+                                // console.log("done!")
                                 decoderWorker.postMessage(_buffer, [_buffer]);
                             }
 

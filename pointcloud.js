@@ -22,7 +22,6 @@ export class Node {
 
         this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positionBuffer), 3));
         this.geometry.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(colorBuffer), 3, true));
-        this.geometry.setAttribute('lod', new THREE.BufferAttribute(new Uint8Array(Array(this.pointCount).fill(this.lod)), 1));
 
         this.geometry.computeBoundingBox();
         this.geometry.computeBoundingSphere();
@@ -43,42 +42,49 @@ export class Pointcloud {
 
         /* Material used to render this pointcloud's nodes */
         this.material = new THREE.ShaderMaterial({
+            // transparent: false,
+            depthWrite: true,
             depthTest: true,
-            depthWrite: false,
 
             uniforms: {
-                size: { value: 1.0 },
-                scale: { value: window.innerHeight }
+                size: { value: 2.0 },
+                scale: { value: window.innerHeight },
+                cameraNear: { value: window.camera.near },
+                cameraFar: { value: window.camera.far },
             },
 
             vertexShader: `
-                uniform float scale;
-                uniform float size;
+            precision highp float;
 
-                attribute vec3 color;
-                attribute float lod;
+            attribute vec3 color;
 
-                varying vec3 vColor;
+            varying vec3 vColor;
 
-                void main() {
-                    vColor = color;
-                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            void main() {
+                vColor = color;
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
 
-                    // float size = 2.0;
-                    // gl_PointSize = size * (300.0 / -mvPosition.z); // optional size attenuation
+                float minSize = 2.0;
+                float maxSize = 13.0;
+                float minDistance = 100.0;
+                float maxDistance = 5.0;
 
-                    gl_PointSize = size * (scale / -mvPosition.z) * pow(0.5, lod);
+                float distance = abs(mvPosition.z);
+                float t = clamp((distance - maxDistance) / (minDistance - maxDistance), 0.0, 1.0);
+                t = 1.0 - t;
 
-                    gl_Position = projectionMatrix * mvPosition;
-                }
+                gl_Position = projectionMatrix * mvPosition;
+                gl_PointSize = mix(minSize, maxSize, t);
+            }
             `,
             fragmentShader: `
-                precision mediump float;
-                varying vec3 vColor;
+            precision highp float;
 
-                void main() {
-                    gl_FragColor = vec4(vColor, 1.0);
-                }
+            varying vec3 vColor;
+            void main() {
+                gl_FragColor = vec4(vColor, 1.0);
+                return;
+            }
             `,
         });
 
@@ -94,15 +100,18 @@ export class Pointcloud {
         return this.nodes.has(nodeId);
     }
 
-    addNode(node) {
+    addNode(node, rebuild = true) {
         if (!this.nodes.has(node.id)) {
             this.nodes.set(node.id, node);
-            this.needsRebuild = true;
 
-            const b3h = new Box3Helper(node.geometry.boundingBox);
-            scene.add(b3h);
+            if (rebuild) {
+                this.needsRebuild = true;
+            }
 
-            this.b3h = b3h;
+            // const b3h = new Box3Helper(node.geometry.boundingBox);
+            // scene.add(b3h);
+
+            // node.b3h = b3h;
         }
     }
 
@@ -112,8 +121,9 @@ export class Pointcloud {
             node.dispose();
             this.nodes.delete(nodeId);
 
-            if (this.b3h) {
-                this.b3h.geometry.dispose();
+            if (node.b3h) {
+                scene.remove(node.b3h);
+                node.b3h.geometry.dispose();
             }
 
             if (rebuild) {
@@ -145,7 +155,6 @@ export class Pointcloud {
         }
 
         const geometries = Array.from(this.nodes.values()).map(x => x.geometry);
-
         this.geometry = BufferGeometryUtils.mergeGeometries(geometries, false);
 
         this.geometry.computeBoundingBox();
@@ -153,7 +162,6 @@ export class Pointcloud {
 
         console.log("*debug!* " + this.geometry.attributes.position.array.length + " positions")
         console.log("*debug!* " + this.geometry.attributes.color.array.length + " colors")
-        console.log("*debug!* " + this.geometry.attributes.lod.array.length + " lods")
 
         this.needsRebuild = false;
     }
