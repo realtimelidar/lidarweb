@@ -165,5 +165,9 @@ export class Pointcloud {
 
         this.needsRebuild = false;
     }
+
+    getPointCount() {
+        return Array.from(this.nodes.values()).reduce((a, b) => a + b.pointCount, 0);
+    }
     
 }

@@ -5,13 +5,26 @@
     <title>My first three.js app</title>
     <style>
       body { margin: 0; }
+
+      div#ui {
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        color: white;
+      }
     </style>
   </head>
   <body>
-    <div id="info" style="position: absolute; top: 10px; width: 100%; z-index: 100; display: flex; flex-direction: column; gap: 0.5rem; color: white;">
+    <div id="ui">
       <span style="font-size: larger;" id="info-fps"></span>
       <span style="font-size: larger;" id="info-nodes"></span>
+      <span style="font-size: larger;" id="info-pnts"></span>
     </div>
+
     <script src="/libs/cbor/cbor.js"></script>
     <script type="module" src="/main.js"></script>
   </body>

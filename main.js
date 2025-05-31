@@ -5,11 +5,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Box3Helper } from "./utils/Box3Helper.js"
 import { InfiniteGridHelper } from "./utils/InfiniteGridHelper.js"
 import { Node, Pointcloud } from './pointcloud.js';
+import { RadiationCloud, RadiationNode } from './radiation.js';
 
 window.fps = 0;
 
 // Initialize THREE
-
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 10000); // 1000*1000
 
@@ -25,18 +25,21 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.1;
 
 const pointcloud = new Pointcloud();
+const radiation = new RadiationCloud();
 
 const t3points = new THREE.Points(pointcloud.geometry, pointcloud.material);
 t3points.frustumCulled = false;
 
-// t3points.layers.set(1);
+const radMesh = new THREE.Mesh(radiation.geometry, radiation.material);
 
+scene.add(radMesh);
 scene.add(t3points);
 
 let lastCameraValue = "";
 
 const CAM_UPDATE_RATE = 50;
-const PC_UPDATE_RATE = 0;
+const PC_UPDATE_RATE = 100;
+const RAD_UPDATE_RATE = PC_UPDATE_RATE;
 
 function sendCameraValues() {
     const a = {
@@ -72,17 +75,17 @@ function sendCameraValues() {
     websocketWorker.postMessage({ t: "send", msg: a, isJson: true });
 }
 
-const renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+const edlRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat
 });
-renderTarget.depthTexture = new THREE.DepthTexture();
-// renderTarget.depthTexture.type = THREE.UnsignedShortType;
-renderTarget.depthTexture.type = THREE.FloatType;
 
-const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-const quadGeo = new THREE.PlaneGeometry(2, 2);
+edlRenderTarget.depthTexture = new THREE.DepthTexture();
+edlRenderTarget.depthTexture.type = THREE.FloatType;
+
+const edlOrthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const edlQuadGeo = new THREE.PlaneGeometry(2, 2);
 
 const edlMaterial = new THREE.ShaderMaterial({
     vertexShader: `
@@ -133,8 +136,8 @@ const edlMaterial = new THREE.ShaderMaterial({
         }
     `,
     uniforms: {
-        tColor: { value: renderTarget.texture },
-        tDepth: { value: renderTarget.depthTexture },
+        tColor: { value: edlRenderTarget.texture },
+        tDepth: { value: edlRenderTarget.depthTexture },
         screenWidth: { value: window.innerWidth },
         screenHeight: { value: window.innerHeight },
         edlStrength: { value: 0.5 },
@@ -144,12 +147,13 @@ const edlMaterial = new THREE.ShaderMaterial({
     }
 });
 
-const screenQuad = new THREE.Mesh(quadGeo, edlMaterial);
-const screenScene = new THREE.Scene();
-screenScene.add(screenQuad);
+const edlScreenQuad = new THREE.Mesh(edlQuadGeo, edlMaterial);
+const edlScreenScene = new THREE.Scene();
+edlScreenScene.add(edlScreenQuad);
 
 // Render loop
 let geometryTimeTracker;
+let radiationTimeTracker;
 let cameraTimeTracker;
 let start;
 
@@ -169,12 +173,25 @@ function animate(timestamp) {
         cameraTimeTracker = timestamp;
     }
 
-    if (timestamp - geometryTimeTracker >= 250 && (pointcloud.needsRebuild && timestamp - lastRecvNode > CAM_UPDATE_RATE)) {
+    if (radiationTimeTracker == undefined) {
+        radiationTimeTracker = timestamp;
+    }
+
+    if (timestamp - radiationTimeTracker >= RAD_UPDATE_RATE && radiation.needsRebuild) {
+        radiation.buildMergedGeometry();
+        radMesh.geometry = radiation.geometry;
+
+        radiationTimeTracker = timestamp;
+    }
+
+    
+    if (timestamp - geometryTimeTracker >= CAM_UPDATE_RATE && (pointcloud.needsRebuild && timestamp - lastRecvNode > CAM_UPDATE_RATE)) {
         pointcloud.buildMergedGeometry();
         t3points.geometry = pointcloud.geometry;
 
         geometryTimeTracker = timestamp;
         document.getElementById("info-nodes").innerHTML = `${pointcloud.nodes.size} nodes`;
+        document.getElementById("info-pnts").innerHTML = `${pointcloud.getPointCount()} points`;
     }
 
     if (timestamp - cameraTimeTracker >= CAM_UPDATE_RATE) {
@@ -183,7 +200,6 @@ function animate(timestamp) {
     }
 
     // FPS
-    
     frames ++;
     const time = performance.now();
     
@@ -199,27 +215,32 @@ function animate(timestamp) {
     controls.update();
     requestAnimationFrame(animate);
 
-    renderer.setRenderTarget(renderTarget);
+    renderer.setRenderTarget(edlRenderTarget);
     renderer.clear();
     renderer.render(scene, camera);
 
     renderer.setRenderTarget(null);
     renderer.clear();
-    renderer.render(screenScene, orthoCamera);
+    renderer.render(edlScreenScene, edlOrthoCamera);
 }
 
 animate();
 
 window.addEventListener('resize', () => {
+    edlRenderTarget.setSize(window.innerWidth, window.innerHeight);
     renderer.setSize(window.innerWidth, window.innerHeight);
+
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+
+    edlMaterial.uniforms.screenWidth.value = window.innerWidth;
+    edlMaterial.uniforms.screenHeight.value = window.innerHeight;
 });
 
 // Initialize Websocket connection 
 // We will put this in a WebWorker to avoid rendering interruption
 const websocketWorker = new Worker("/workers/ws.js");
-websocketWorker.postMessage({ t: "start", url: "ws://10.0.1.14:3000" });
+websocketWorker.postMessage({ t: "start", url: "wss://lidarweb.adrian.cat/ws/" });
 
 let lastRecvNode = 0;
 
@@ -269,9 +290,49 @@ websocketWorker.onmessage = e => {
 
             scene.add( grid );
 
+            setTimeout(() => {
+                console.log("radiation...");
+
+                const bbSize = new THREE.Vector3();
+                bb3.getSize(bbSize);
+
+                const bbCenter = new THREE.Vector3();
+                bb3.getCenter(bbCenter);
+
+                const innerSize = bbSize.clone().multiplyScalar(0.5);
+                const innerMin = bbCenter.clone().sub(innerSize.clone().multiplyScalar(0.5));
+                const innerMax = bbCenter.clone().add(innerSize.clone().multiplyScalar(0.5));
+
+                const innerBox = new THREE.Box3(innerMin, innerMax);
+
+                function getRandomPointInBox(box) {
+                    const min = box.min;
+                    const max = box.max;
+                    return new THREE.Vector3(
+                        THREE.MathUtils.lerp(min.x, max.x, Math.random()),
+                        THREE.MathUtils.lerp(min.y, max.y, Math.random()),
+                        THREE.MathUtils.lerp(min.z, max.z, Math.random())
+                    );
+                }
+
+                // setInterval(() => {
+                //     console.log("new radiation!");
+                //     const pos = getRandomPointInBox(innerBox);
+                //     const value = Math.random() * 25;
+
+                //     let node = new RadiationNode(
+                //         pos.x, pos.y, pos.z, value
+                //     );
+
+                //     radiation.addNode(node);
+                // }, 500);
+
+            }, 100);
+
             const focus = bb3.getCenter(new THREE.Vector3());
             const vPosition = new THREE.Vector3(0.0, 0.0, 400).add(focus)
 
+            // radMesh.position.copy(focus);
 
             camera.position.copy(vPosition);
             controls.target.copy(focus);
