@@ -5,9 +5,121 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Box3Helper } from "./utils/Box3Helper.js"
 import { InfiniteGridHelper } from "./utils/InfiniteGridHelper.js"
 import { Node, Pointcloud } from './pointcloud.js';
-import { RadiationCloud, RadiationNode } from './radiation.js';
+import { RadiationCloud, RadiationNode } from './radiation/discrete.js';
+import { RawRadiationCloud } from './radiation/continuous.js';
 
-window.fps = 0;
+import GUI from 'lil-gui';
+import { ExampleData } from './radiation/continuous.js';
+
+const gui = new GUI({ title: 'Lidarweb - Options' });
+
+let CAM_UPDATE_RATE = 50;
+let PC_UPDATE_RATE = 100;
+let RAD_UPDATE_RATE = PC_UPDATE_RATE;
+
+const config = {
+    nodeCount: 0,
+    pointCount: 0,
+
+    quality: 'Medium',
+
+    pointSizeStyle: 'Adaptive',
+    pointSize: 2.0,
+
+    edl: true,
+    edlStrength: 0.5,
+    edlRadius: 1.5,
+
+    showBB: false
+};
+
+const qualityConfig = {
+    'Low': {
+        camMaxDistance: 5.0,
+        pcUpdateRate: 500,
+        camUpdateRate: 250,
+    },
+
+    'Medium': {
+        camMaxDistance: 2.5,
+        pcUpdateRate: 250,
+        camUpdateRate: 250,
+    },
+
+    'High': {
+        camMaxDistance: 1.5,
+        pcUpdateRate: 100,
+        camUpdateRate: 100,
+    },
+
+    'Extreme': {
+        camMaxDistance: 0.1,
+        pcUpdateRate: 0,
+        camUpdateRate: 10,
+    }
+}
+
+window.config = config;
+
+function buildGUI() {
+    const stats = gui.addFolder('Stats');
+
+    window.nodeCountGUI = stats.add(config, 'nodeCount', 0).name('Loaded nodes').disable();
+    window.pointCountGUI = stats.add(config, 'pointCount', 0).name('Point count').disable();
+
+    const appearance = gui.addFolder('Appearance');
+
+    appearance.add(config, 'quality', [ 'Low', 'Medium', 'High', 'Extreme' ]).name('Quality').onChange(v => {
+        PC_UPDATE_RATE = qualityConfig[config.quality].pcUpdateRate;
+        CAM_UPDATE_RATE = qualityConfig[config.quality].camUpdateRate;
+    });
+
+    appearance.add(config, 'pointSizeStyle', [ 'Adaptive', 'Fixed' ]).name('Point Size').onChange(v => {
+        if (v == 'Adaptive') {
+            window.pointSizeGUI.hide();
+            pointcloud.material.uniforms.fixedSize.value = 0.0;
+        } else {
+            window.pointSizeGUI.show();
+            pointcloud.material.uniforms.fixedSize.value = config.pointSize;
+        }
+    });
+
+    window.pointSizeGUI = appearance.add(config, 'pointSize', 2.0).name('Size').hide().onChange(v => {
+        pointcloud.material.uniforms.fixedSize.value = v;
+    });
+
+    appearance.add(config, 'showBB', false).name('Show Bounding Boxes').onChange(v => {
+        if (!v) {
+            pointcloud.nodes.values().forEach(n => {
+                if (n.b3h) {
+                    scene.remove(n.b3h);
+                }
+            })
+        } else {
+            pointcloud.nodes.values().forEach(n => {
+                if (n.b3h) {
+                    scene.add(n.b3h);
+                }
+            })
+        }
+    });
+
+    const edm = gui.addFolder('Eye-dome Lighting');
+
+    edm.add(config, 'edl', true).name('Enable');
+
+    edm.add(config, 'edlStrength', 0.5).min(0).max(10).name('Strength').onChange(v => {
+        edlMaterial.uniforms.edlStrength.value = v;
+    });
+
+    edm.add(config, 'edlRadius', 1.5).min(0).max(10).name('Radius').onChange(v => {
+        edlMaterial.uniforms.edlRadius.value = v;
+    });
+
+
+}
+
+buildGUI();
 
 // Initialize THREE
 const scene = new THREE.Scene();
@@ -26,6 +138,9 @@ controls.dampingFactor = 0.1;
 
 const pointcloud = new Pointcloud();
 const radiation = new RadiationCloud();
+const rawRadiation = new RawRadiationCloud();
+
+window.rawRadiation = rawRadiation;
 
 const t3points = new THREE.Points(pointcloud.geometry, pointcloud.material);
 t3points.frustumCulled = false;
@@ -36,10 +151,6 @@ scene.add(radMesh);
 scene.add(t3points);
 
 let lastCameraValue = "";
-
-const CAM_UPDATE_RATE = 50;
-const PC_UPDATE_RATE = 100;
-const RAD_UPDATE_RATE = PC_UPDATE_RATE;
 
 function sendCameraValues() {
     const a = {
@@ -55,7 +166,7 @@ function sendCameraValues() {
                             "z_near": camera.near * 100,
                             "z_far": camera.far * 100,
                             "window_size": [window.innerWidth, window.innerHeight],
-                            "max_distance": 2.5
+                            "max_distance": qualityConfig[config.quality].camMaxDistance
                         }
                     }, "Full"
                 ]
@@ -140,8 +251,8 @@ const edlMaterial = new THREE.ShaderMaterial({
         tDepth: { value: edlRenderTarget.depthTexture },
         screenWidth: { value: window.innerWidth },
         screenHeight: { value: window.innerHeight },
-        edlStrength: { value: 0.5 },
-        edlRadius: { value: 1.5 },
+        edlStrength: { value: config.edlStrength },
+        edlRadius: { value: config.edlRadius },
         cameraNear: { value: camera.near },
         cameraFar: { value: camera.far }
     }
@@ -156,9 +267,6 @@ let geometryTimeTracker;
 let radiationTimeTracker;
 let cameraTimeTracker;
 let start;
-
-let frames = 0;
-let prevTime = 0;
 
 function animate(timestamp) {
     if (start == undefined) {
@@ -190,8 +298,12 @@ function animate(timestamp) {
         t3points.geometry = pointcloud.geometry;
 
         geometryTimeTracker = timestamp;
-        document.getElementById("info-nodes").innerHTML = `${pointcloud.nodes.size} nodes`;
-        document.getElementById("info-pnts").innerHTML = `${pointcloud.getPointCount()} points`;
+
+        config.nodeCount = pointcloud.nodes.size;
+        window.nodeCountGUI.updateDisplay();
+
+        config.pointCount = pointcloud.getPointCount().toLocaleString();
+        window.pointCountGUI.updateDisplay();
     }
 
     if (timestamp - cameraTimeTracker >= CAM_UPDATE_RATE) {
@@ -199,21 +311,14 @@ function animate(timestamp) {
         cameraTimeTracker = timestamp;
     }
 
-    // FPS
-    frames ++;
-    const time = performance.now();
-    
-    if ( time >= prevTime + 1000 ) {
-        fps =  Math.round((frames * 1000)/(time - prevTime));
-        document.getElementById("info-fps").innerHTML = `fps: ${fps}`;
-
-        fps = 0;
-        prevTime = time;
-    }
-      
-
     controls.update();
     requestAnimationFrame(animate);
+
+    if (!config.edl) {
+        renderer.setRenderTarget(null);
+        renderer.render(scene, camera);
+        return;
+    }
 
     renderer.setRenderTarget(edlRenderTarget);
     renderer.clear();
@@ -293,6 +398,10 @@ websocketWorker.onmessage = e => {
             setTimeout(() => {
                 console.log("radiation...");
 
+                //
+                // DISCRETE
+                //
+
                 const bbSize = new THREE.Vector3();
                 bb3.getSize(bbSize);
 
@@ -318,7 +427,7 @@ websocketWorker.onmessage = e => {
                 // setInterval(() => {
                 //     console.log("new radiation!");
                 //     const pos = getRandomPointInBox(innerBox);
-                //     const value = Math.random() * 25;
+                //     const value = Math.random() * 100;
 
                 //     let node = new RadiationNode(
                 //         pos.x, pos.y, pos.z, value
@@ -327,15 +436,41 @@ websocketWorker.onmessage = e => {
                 //     radiation.addNode(node);
                 // }, 500);
 
+                //
+                // CONTINUOUS
+                //
+
+                const string = ExampleData;
+                string.split("\n").forEach(line => {
+                    const items = line.split(',');
+                    const value = parseFloat(items[2]);
+                    const pos = getRandomPointInBox(bb3);
+
+                    rawRadiation.add(pos.x, pos.y, value);
+                });
+
+                const radWorker = new Worker('./workers/continuousRadiation.js');
+                window.radWorker = radWorker;
+
+                radWorker.onmessage = e => {
+                    const { nodeId, resultBuffer } = e.data;
+                    if (pointcloud.nodes.has(nodeId)) {
+                        pointcloud.nodes.get(nodeId).setRadiation(resultBuffer);
+                    }
+                }
+
             }, 100);
 
-            const focus = bb3.getCenter(new THREE.Vector3());
-            const vPosition = new THREE.Vector3(0.0, 0.0, 400).add(focus)
+            const bbCenter = bb3.getCenter(new THREE.Vector3());
+            const bbSize = bb3.getSize(new THREE.Vector3());
+            const maxSize = Math.max(bbSize.x, bbSize.y, bbSize.z);
 
-            // radMesh.position.copy(focus);
+            const d = maxSize;
+            const direction = new THREE.Vector3(0, -1, 0.5).normalize();
+            const camPos = bbCenter.clone().addScaledVector(direction, d);
 
-            camera.position.copy(vPosition);
-            controls.target.copy(focus);
+            camera.position.copy(camPos);
+            controls.target.copy(bbCenter);
             controls.update();
             break;
     }
