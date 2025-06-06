@@ -23,14 +23,16 @@ export class Node {
         this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positionBuffer), 3));
         this.geometry.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(colorBuffer), 3, true));
 
+        // console.log(new Float32Array(positionBuffer));
+
         //
         // RADIATION
         //
 
-        const radiation = window.rawRadiation;
+        // const radiation = window.rawRadiation;
 
-        const radiationAttrib = new Float32Array(this.pointCount);
-        this.geometry.setAttribute('radiation', new THREE.BufferAttribute(radiationAttrib, 1));
+        // const radiationAttrib = new Float32Array(this.pointCount);
+        // this.geometry.setAttribute('radiation', new THREE.BufferAttribute(radiationAttrib, 1));
 
         // for (let i = 0; i < this.pointCount; i++) {
         //     const pX = this.geometry.attributes.position.array[i * 3];
@@ -49,22 +51,22 @@ export class Node {
         //     radiationAttrib[i] = value;
         // }
 
-        const msg = {
-            nodeId: this.id,
-            radiation: new Float32Array(radiation.data.map(x => [ x.x, x.y, x.value ]).flat()).buffer,
-            positionBuffer: positionBuffer,
-            pointCount: this.pointCount
-        };
+        // const msg = {
+        //     nodeId: this.id,
+        //     radiation: new Float32Array(radiation.data.map(x => [ x.x, x.y, x.value ]).flat()).buffer,
+        //     positionBuffer: positionBuffer,
+        //     pointCount: this.pointCount
+        // };
 
-        window.radWorker.postMessage(msg, [ msg.radiation ]);
+        // window.radWorker.postMessage(msg, [ msg.radiation ]);
 
         this.geometry.computeBoundingBox();
         this.geometry.computeBoundingSphere();
     }
 
     setRadiation(buffer) {
-        this.geometry.attributes.radiation.set(new Float32Array(buffer));
-        this.geometry.attributes.radiation.needsUpdate = true;
+        // this.geometry.attributes.radiation.set(new Float32Array(buffer));
+        // this.geometry.attributes.radiation.needsUpdate = true;
     }
 
     dispose() {
@@ -100,14 +102,14 @@ export class Pointcloud {
             uniform float fixedSize;
 
             attribute vec3 color;
-            attribute float radiation;
+            // attribute float radiation;
 
             varying vec3 vColor;
-            varying float vRadiation;
+            // varying float vRadiation;
 
             void main() {
                 vColor = color;
-                vRadiation = radiation;
+                // vRadiation = radiation;
 
                 vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
 
@@ -134,7 +136,7 @@ export class Pointcloud {
             precision highp float;
 
             varying vec3 vColor;
-            varying float vRadiation;
+            // varying float vRadiation;
 
             vec3 INFERNO(float value) {
                 if (value <= 0.0) return vec3(0.077, 0.042, 0.206);
@@ -181,14 +183,15 @@ export class Pointcloud {
             }
 
             void main() {
-                float normalized = vRadiation / 100.0;
-                if (normalized <= 0.6) {
-                    gl_FragColor = vec4(vColor, 1.0);
-                } else {
-                    // vec3 result = RAINBOW(normalized) * vColor;
-                    vec3 result = mix(vColor, RAINBOW(normalized), 0.5);
-                    gl_FragColor = vec4(result, 1.0);
-                }
+                gl_FragColor = vec4(vColor, 1.0);
+                // float normalized = vRadiation / 100.0;
+                // if (normalized <= 0.6) {
+                //     gl_FragColor = vec4(vColor, 1.0);
+                // } else {
+                //     // vec3 result = RAINBOW(normalized) * vColor;
+                //     vec3 result = mix(vColor, RAINBOW(normalized), 0.5);
+                //     gl_FragColor = vec4(result, 1.0);
+                // }
 
                 // 
                 return;

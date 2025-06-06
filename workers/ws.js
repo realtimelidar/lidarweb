@@ -54,6 +54,8 @@ let _readingFrag = false;
 let _buffer;
 let _typed;
 
+let _cs = null;
+
 const log = msg => {
     if (_debug) {
         console.log("[websocket] " + msg);
@@ -176,7 +178,10 @@ onmessage = e => {
                             const codec = decoded["PointCloudInfo"]["codec"];
                             const currentBoundingBox = decoded["PointCloudInfo"]["current_bounding_box"];
 
-                            postMessage({ t: "bb", p: currentBoundingBox });
+                            _cs = coordinateSystem["offset"];
+                            _cs[2] = 0;
+
+                            postMessage({ t: "bb", p:  { bb: currentBoundingBox, cs: { "offset": _cs } }});
                             // WS.call('InitialBoundingBox', currentBoundingBox);
                         }
                     } else if (_state == 3) {
@@ -216,13 +221,22 @@ onmessage = e => {
                             if (_dataLen == _recvBytes) {
                                 _readingFrag = false;
                                 // console.log("done!")
-                                decoderWorker.postMessage(_buffer, [_buffer]);
+
+                                const msg = {
+                                    buffer: _buffer,
+                                    cs: _cs
+                                };
+                                decoderWorker.postMessage(msg, [msg.buffer]);
                             }
 
                             return;
                         }
 
-                        decoderWorker.postMessage(u8data.buffer, [u8data.buffer]);
+                        const msg = {
+                            buffer: u8data.buffer,
+                            cs: _cs
+                        };
+                        decoderWorker.postMessage(msg, [msg.buffer]);
                     }
                 }
             });
