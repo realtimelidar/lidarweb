@@ -8,7 +8,6 @@ import { Node, Pointcloud } from './pointcloud.js';
 import { RadiationCloud, RadiationNode } from './radiation/discrete.js';
 import { RawRadiationCloud } from './radiation/continuous.js';
 
-import { ExampleData } from './radiation/continuous.js';
 import EDL from './edl.js';
 import { buildGUI, qualityConfig } from './gui.js'
 
@@ -21,7 +20,6 @@ window.PC_UPDATE_RATE = PC_UPDATE_RATE;
 window.RAD_UPDATE_RATE = RAD_UPDATE_RATE;
 
 let visualOffset = { x: 0, y: 0, z: 0};
-window.visualOffset = visualOffset;
 
 buildGUI();
 
@@ -60,7 +58,6 @@ const edl = new EDL(
     camera.near, camera.far,
     config.edlRadius, config.edlStrength
 );
-
 window.edl = edl;
 
 let lastCameraValue = "";
@@ -102,8 +99,6 @@ function sendCameraValues() {
     }
 
     lastCameraValue = JSON.stringify(a);
-    console.log(lastCameraValue);
-    console.log("real cam pos", camera.getWorldPosition(new THREE.Vector3()).toArray());
     websocketWorker.postMessage({ t: "send", msg: a, isJson: true });
 }
 
@@ -138,7 +133,7 @@ function animate(timestamp) {
     }
 
     
-    if (timestamp - geometryTimeTracker >= CAM_UPDATE_RATE && (pointcloud.needsRebuild && timestamp - lastRecvNode > CAM_UPDATE_RATE)) {
+    if (timestamp - geometryTimeTracker >= PC_UPDATE_RATE && (pointcloud.needsRebuild && (timestamp - lastRecvNode > 2 * PC_UPDATE_RATE || timestamp - lastRecvNode > 10 * PC_UPDATE_RATE))) {
         pointcloud.buildMergedGeometry();
         t3points.geometry = pointcloud.geometry;
 
@@ -149,9 +144,11 @@ function animate(timestamp) {
 
         config.pointCount = pointcloud.getPointCount().toLocaleString();
         window.pointCountGUI.updateDisplay();
+
+        // document.getElementById("loading").style.display = "none";
     }
 
-    if (timestamp - cameraTimeTracker >= CAM_UPDATE_RATE) {
+    if (timestamp - cameraTimeTracker >= CAM_UPDATE_RATE && websocketWorker) {
         sendCameraValues();
         cameraTimeTracker = timestamp;
     }
@@ -187,153 +184,111 @@ window.addEventListener('resize', () => {
     edl.updateUniforms();
 });
 
-// Initialize Websocket connection 
-// We will put this in a WebWorker to avoid rendering interruption
-const websocketWorker = new Worker("/workers/ws.js");
-// websocketWorker.postMessage({ t: "start", url: "wss://lidarweb.adrian.cat/ws/" });
-websocketWorker.postMessage({ t: "start", url: "ws://127.0.0.01:3000/ws/" });
-
+let websocketWorker = null;
 let lastRecvNode = 0;
 
-websocketWorker.onmessage = e => {
-    switch (e.data.t) {
-        case 'UpdateNode':
-            let updateInfo = e.data.payload;
-            const updatedNodeInfo = e.data.payload.node;
+function initRealtime() {
+    // Initialize Websocket connection 
+    // We will put this in a WebWorker to avoid rendering interruption
+    websocketWorker = new Worker("/workers/ws.js");
+    // websocketWorker.postMessage({ t: "start", url: "wss://lidarweb.adrian.cat/ws/" });
+    websocketWorker.postMessage({ t: "start", url: "ws://127.0.0.01:3000/ws/" });
 
-            if (!updateInfo.points || updateInfo.points.length <= 0) {
-                return;
-            }
+    lastCameraValue = "";
 
-            const updatedNodeId = Node.getNodeId({ pos: updatedNodeInfo.pos, lod: updatedNodeInfo.lod });
+    websocketWorker.onmessage = e => {
+        switch (e.data.t) {
+            case 'UpdateNode':
+                let updateInfo = e.data.payload;
+                const updatedNodeInfo = e.data.payload.node;
 
-            if (pointcloud.hasNode(updatedNodeId)) {
-                pointcloud.removeNode(updatedNodeId, false);
-            }
+                if (!updateInfo.points || updateInfo.points.length <= 0) {
+                    return;
+                }
 
-            lastRecvNode = document.timeline.currentTime;
+                const updatedNodeId = Node.getNodeId({ pos: updatedNodeInfo.pos, lod: updatedNodeInfo.lod });
 
-            let node = new Node(
-                updatedNodeInfo.pos.x, updatedNodeInfo.pos.y, updatedNodeInfo.pos.z, updatedNodeInfo.lod,
-                updateInfo.points.pBuff, updateInfo.points.cBuff
-            );
+                if (pointcloud.hasNode(updatedNodeId)) {
+                    pointcloud.removeNode(updatedNodeId, false);
+                }
 
-            pointcloud.addNode(node);
-            break;
-        case 'DeleteNode':
-            const deletedNodeInfo = e.data.payload.node;
-            let nodeId = Node.getNodeId(deletedNodeInfo);
+                lastRecvNode = document.timeline.currentTime;
 
-            pointcloud.removeNode(nodeId);
-            break;
-        case 'bb':
-            const { bb, cs } = e.data.p;
-            console.log("got initial bounding box = ", bb);
-            console.log("got coordinate system = ", cs);
+                let node = new Node(
+                    updatedNodeInfo.pos.x, updatedNodeInfo.pos.y, updatedNodeInfo.pos.z, updatedNodeInfo.lod,
+                    updateInfo.points.pBuff, updateInfo.points.cBuff
+                );
 
-            visualOffset = { x: cs["offset"][0], y: cs["offset"][1], z: cs["offset"][2] };
-            console.log("updated visual offset: ", visualOffset);
+                pointcloud.addNode(node);
+                // document.getElementById("loading").style.display = "flex";
+                break;
+            case 'DeleteNode':
+                const deletedNodeInfo = e.data.payload.node;
+                let nodeId = Node.getNodeId(deletedNodeInfo);
 
-            bb.min[0] -= visualOffset.x;
-            bb.min[1] -= visualOffset.y;
-            bb.min[2] -= visualOffset.z;
+                pointcloud.removeNode(nodeId);
+                // document.getElementById("loading").style.display = "flex";
+                break;
+            case 'bb':
+                const { bb, cs } = e.data.p;
+                console.log("got initial bounding box = ", bb);
+                console.log("got coordinate system = ", cs);
 
-            bb.max[0] -= visualOffset.x;
-            bb.max[1] -= visualOffset.y;
-            bb.max[2] -= visualOffset.z;
-        
-            // Build visually the bounding box
-            const bb3 = new THREE.Box3(new THREE.Vector3().fromArray(bb.min), new THREE.Vector3().fromArray(bb.max));
+                visualOffset = { x: cs["offset"][0], y: cs["offset"][1], z: cs["offset"][2] };
+                window.visualOffset = visualOffset;
+                // visualOffset = { x: a[0], y: a[1], z: a[2] };
+                // visualOffset = { x: 359834.00, y: 4571492.00, z: 259 };
+                // visualOffset = {
+                //     x: (bb.min[0] + bb.max[0]) / 2,
+                //     y: (bb.min[1] + bb.max[1]) / 2,
+                //     z: (bb.min[2] + bb.max[2]) / 2,
+                // };
 
-            const b3h = new Box3Helper(bb3);
-            scene.add(b3h);
+                console.log("updated visual offset: ", visualOffset);
 
-            // Build a pretty infinite grid
-            // const grid = new InfiniteGridHelper(10, 100);
+                bb.min[0] -= visualOffset.x;
+                bb.min[1] -= visualOffset.y;
+                bb.min[2] -= visualOffset.z;
 
-            // grid.rotateX(Math.PI * 0.5);
-            // grid.position.z = bb3.min.z;
+                bb.max[0] -= visualOffset.x;
+                bb.max[1] -= visualOffset.y;
+                bb.max[2] -= visualOffset.z;
+            
+                // Build visually the bounding box
+                const bb3 = new THREE.Box3(new THREE.Vector3().fromArray(bb.min), new THREE.Vector3().fromArray(bb.max));
 
-            // scene.add( grid );
+                // const b3h = new Box3Helper(bb3);
+                // scene.add(b3h);
 
-            // setTimeout(() => {
-            //     console.log("radiation...");
+                // Build a pretty infinite grid
+                const grid = new InfiniteGridHelper(10, 100);
 
-            //     //
-            //     // DISCRETE
-            //     //
+                grid.rotateX(Math.PI * 0.5);
+                grid.position.z = bb3.min.z;
 
-            //     const bbSize = new THREE.Vector3();
-            //     bb3.getSize(bbSize);
+                scene.add( grid );
 
-            //     const bbCenter = new THREE.Vector3();
-            //     bb3.getCenter(bbCenter);
+                const bbCenter = bb3.getCenter(new THREE.Vector3());
 
-            //     const innerSize = bbSize.clone().multiplyScalar(0.5);
-            //     const innerMin = bbCenter.clone().sub(innerSize.clone().multiplyScalar(0.5));
-            //     const innerMax = bbCenter.clone().add(innerSize.clone().multiplyScalar(0.5));
+                const bbSize = bb3.getSize(new THREE.Vector3());
+                const maxSize = Math.max(bbSize.x, bbSize.y, bbSize.z);
 
-            //     const innerBox = new THREE.Box3(innerMin, innerMax);
+                const d = maxSize;
+                const direction = new THREE.Vector3(0, -1, 0.5).normalize();
+                const camPos = bbCenter.clone().addScaledVector(direction, d);
 
-            //     function getRandomPointInBox(box) {
-            //         const min = box.min;
-            //         const max = box.max;
-            //         return new THREE.Vector3(
-            //             THREE.MathUtils.lerp(min.x, max.x, Math.random()),
-            //             THREE.MathUtils.lerp(min.y, max.y, Math.random()),
-            //             THREE.MathUtils.lerp(min.z, max.z, Math.random())
-            //         );
-            //     }
-
-            //     // setInterval(() => {
-            //     //     console.log("new radiation!");
-            //     //     const pos = getRandomPointInBox(innerBox);
-            //     //     const value = Math.random() * 100;
-
-            //     //     let node = new RadiationNode(
-            //     //         pos.x, pos.y, pos.z, value
-            //     //     );
-
-            //     //     radiation.addNode(node);
-            //     // }, 500);
-
-            //     //
-            //     // CONTINUOUS
-            //     //
-
-            //     // const string = ExampleData;
-            //     // string.split("\n").forEach(line => {
-            //     //     const items = line.split(',');
-            //     //     const value = parseFloat(items[2]);
-            //     //     const pos = getRandomPointInBox(bb3);
-
-            //     //     rawRadiation.add(pos.x, pos.y, value);
-            //     // });
-
-            //     // const radWorker = new Worker('./workers/continuousRadiation.js');
-            //     // window.radWorker = radWorker;
-
-            //     // radWorker.onmessage = e => {
-            //     //     const { nodeId, resultBuffer } = e.data;
-            //     //     if (pointcloud.nodes.has(nodeId)) {
-            //     //         pointcloud.nodes.get(nodeId).setRadiation(resultBuffer);
-            //     //     }
-            //     // }
-
-            // }, 100);
-
-            const bbCenter = bb3.getCenter(new THREE.Vector3());
-
-            const bbSize = bb3.getSize(new THREE.Vector3());
-            const maxSize = Math.max(bbSize.x, bbSize.y, bbSize.z);
-
-            const d = maxSize;
-            const direction = new THREE.Vector3(0, -1, 0.5).normalize();
-            const camPos = bbCenter.clone().addScaledVector(direction, d);
-
-            camera.position.copy(camPos);
-            controls.target.copy(bbCenter);
-            controls.update();
-            break;
+                camera.position.copy(camPos);
+                controls.target.copy(bbCenter);//.addScaledVector(new THREE.Vector3(0, 0, 1).multiplyScalar(-0.5), d));
+                controls.update();
+                break;
+        }
     }
 }
+
+window.initRealtime = initRealtime;
+
+if (config.pointcloudMode == 'Realtime') {
+    initRealtime();
+}
+
+

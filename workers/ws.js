@@ -179,7 +179,11 @@ onmessage = e => {
                             const currentBoundingBox = decoded["PointCloudInfo"]["current_bounding_box"];
 
                             _cs = coordinateSystem["offset"];
-                            _cs[2] = 0;
+                            // _cs[2] = 0;
+
+                            // _cs = currentBoundingBox["min"].map(x => Math.floor(x));
+                            // _cs = [359834.00, 4571492.00, 259];
+                            // _cs = [ (currentBoundingBox.min[0] + currentBoundingBox.max[0]) / 2, (currentBoundingBox.min[1] + currentBoundingBox.max[1]) / 2, (currentBoundingBox.min[2] + currentBoundingBox.max[2]) / 2 ];
 
                             postMessage({ t: "bb", p:  { bb: currentBoundingBox, cs: { "offset": _cs } }});
                             // WS.call('InitialBoundingBox', currentBoundingBox);

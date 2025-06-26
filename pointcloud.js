@@ -3,12 +3,27 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { Box3Helper } from "./utils/Box3Helper.js"
 
 export class Node {
+    static usedPickingIdx = new Map();
+
     static getNodeId(nodeInfo) {
         return `${nodeInfo.pos.x}_${nodeInfo.pos.y}_${nodeInfo.pos.z}_${nodeInfo.lod}`;
     }
 
+    static getNextPickingIdx() {
+        let idx = 0;
+        while (Node.usedPickingIdx.has(idx)) {
+            idx++;
+        }
+
+        return idx;
+    }
+
     constructor(x, y, z, lod, positionBuffer, colorBuffer) {
         this.id = Node.getNodeId({ pos: { x, y, z }, lod: lod });
+
+        // this.pickingIdx = Node.getNextPickingIdx();
+        // console.log(this.pickingIdx + " => " + this.id);
+        // Node.usedPickingIdx.set(this.pickingIdx, this.id);
 
         this.x = x;
         this.y = y;
@@ -22,57 +37,39 @@ export class Node {
 
         this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positionBuffer), 3));
         this.geometry.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(colorBuffer), 3, true));
+        this.geometry.setAttribute('radiation', new THREE.BufferAttribute(new Float32Array(this.pointCount), 1));
 
-        // console.log(new Float32Array(positionBuffer));
-
-        //
-        // RADIATION
-        //
-
-        // const radiation = window.rawRadiation;
-
-        // const radiationAttrib = new Float32Array(this.pointCount);
-        // this.geometry.setAttribute('radiation', new THREE.BufferAttribute(radiationAttrib, 1));
-
-        // for (let i = 0; i < this.pointCount; i++) {
-        //     const pX = this.geometry.attributes.position.array[i * 3];
-        //     const pY = this.geometry.attributes.position.array[i * 3 + 1];
-            
-        //     let value = radiation.get(pX, pY);
-
-        //     // clamp
-        //     if (value > radiation.maxValue) {
-        //         value = radiation.maxValue;
-        //     }
-
-        //     // Normalize
-        //     value = value / radiation.maxValue;
-
-        //     radiationAttrib[i] = value;
-        // }
-
-        // const msg = {
-        //     nodeId: this.id,
-        //     radiation: new Float32Array(radiation.data.map(x => [ x.x, x.y, x.value ]).flat()).buffer,
-        //     positionBuffer: positionBuffer,
-        //     pointCount: this.pointCount
-        // };
-
-        // window.radWorker.postMessage(msg, [ msg.radiation ]);
+        // If we already have radiation data, load it into this node
+        this.updateRadiation();
 
         this.geometry.computeBoundingBox();
         this.geometry.computeBoundingSphere();
     }
 
     setRadiation(buffer) {
-        // this.geometry.attributes.radiation.set(new Float32Array(buffer));
-        // this.geometry.attributes.radiation.needsUpdate = true;
+        this.geometry.attributes.radiation.set(new Float32Array(buffer));
+        this.geometry.attributes.radiation.needsUpdate = true;
+    }
+
+    updateRadiation() {
+        if (window.rawRadiation && window.radWorker && window.rawRadiation.data.length > 0) {
+            const msg = {
+                nodeId: this.id,
+                radiation: new Float32Array(window.rawRadiation.data.map(x => [ x.x, x.y, x.value ]).flat()).buffer,
+                positionBuffer: this.geometry.attributes.position.array,
+                pointCount: this.pointCount,
+                offset: window.visualOffset
+            };
+            window.radWorker.postMessage(msg, [ msg.radiation ]);
+        }
     }
 
     dispose() {
         if (this.geometry) {
             this.geometry.dispose();
         }
+
+        Node.usedPickingIdx.delete(this.pickingIdx);
     }
 }
 
@@ -94,6 +91,11 @@ export class Pointcloud {
                 scale: { value: window.innerHeight },
                 cameraNear: { value: window.camera.near },
                 cameraFar: { value: window.camera.far },
+
+                gradientMaxValue: { value: 100.0 },
+                gradientThreshold: { value: 0.4 },
+                gradientShow: { value: 1.0 },
+
             },
 
             vertexShader: `
@@ -102,14 +104,14 @@ export class Pointcloud {
             uniform float fixedSize;
 
             attribute vec3 color;
-            // attribute float radiation;
+            attribute float radiation;
 
             varying vec3 vColor;
-            // varying float vRadiation;
+            varying float vRadiation;
 
             void main() {
                 vColor = color;
-                // vRadiation = radiation;
+                vRadiation = radiation;
 
                 vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
 
@@ -117,9 +119,9 @@ export class Pointcloud {
                     gl_PointSize = fixedSize;
                 } else {
                     float minSize = 2.0;
-                    float maxSize = 13.0;
-                    float minDistance = 100.0;
-                    float maxDistance = 5.0;
+                    float maxSize = 8.0;
+                    float minDistance = 80.0;
+                    float maxDistance = 10.0;
 
                     float distance = abs(mvPosition.z);
                     float t = clamp((distance - maxDistance) / (minDistance - maxDistance), 0.0, 1.0);
@@ -129,14 +131,18 @@ export class Pointcloud {
                 }
 
                 gl_Position = projectionMatrix * mvPosition;
-                
+
             }
             `,
             fragmentShader: `
             precision highp float;
 
+            uniform float gradientThreshold;
+            uniform float gradientMaxValue;
+            uniform float gradientShow;
+
             varying vec3 vColor;
-            // varying float vRadiation;
+            varying float vRadiation;
 
             vec3 INFERNO(float value) {
                 if (value <= 0.0) return vec3(0.077, 0.042, 0.206);
@@ -183,17 +189,22 @@ export class Pointcloud {
             }
 
             void main() {
-                gl_FragColor = vec4(vColor, 1.0);
-                // float normalized = vRadiation / 100.0;
-                // if (normalized <= 0.6) {
-                //     gl_FragColor = vec4(vColor, 1.0);
-                // } else {
-                //     // vec3 result = RAINBOW(normalized) * vColor;
-                //     vec3 result = mix(vColor, RAINBOW(normalized), 0.5);
-                //     gl_FragColor = vec4(result, 1.0);
-                // }
+                if (gradientShow == 0.0) {
+                    gl_FragColor = vec4(vColor, 1.0);
+                    return;
+                }
 
-                // 
+                float normalized = vRadiation / gradientMaxValue;
+                if (normalized > 1.0) {
+                    normalized = 1.0;
+                }
+                if (normalized <= gradientThreshold) {
+                    gl_FragColor = vec4(vColor, 1.0);
+                } else {
+                    // vec3 result = RAINBOW(normalized) * vColor;
+                    vec3 result = mix(vColor, RAINBOW(normalized), 0.5);
+                    gl_FragColor = vec4(result, 1.0);
+                }
                 return;
             }
             `,
@@ -280,8 +291,4 @@ export class Pointcloud {
         return Array.from(this.nodes.values()).reduce((a, b) => a + b.pointCount, 0);
     }
 
-    getNearestPoints(position, radius) {
-        
-    }
-    
 }

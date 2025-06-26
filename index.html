@@ -4,10 +4,27 @@
     <meta charset="utf-8">
     <title>Lidarweb</title>
     <style>
-      body { margin: 0; }
+      body { margin: 0; font-family: Arial, Helvetica, sans-seri;}
+      #spinner {
+        animation-name: ckw;
+        animation-duration: 1s;
+        animation-iteration-count: infinite;
+      }
+      @keyframes ckw {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+      }
     </style>
   </head>
   <body>
+    <!-- <div id="loading" style="position: absolute; z-index: 100; color: white; width: 100%; top: 2rem; display: flex; justify-content: center; gap: 1rem; align-items: center;">
+      <svg id="spinner" style="fill: white; width: 1rem;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M304 48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zm0 416a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM48 304a48 48 0 1 0 0-96 48 48 0 1 0 0 96zm464-48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM142.9 437A48 48 0 1 0 75 369.1 48 48 0 1 0 142.9 437zm0-294.2A48 48 0 1 0 75 75a48 48 0 1 0 67.9 67.9zM369.1 437A48 48 0 1 0 437 369.1 48 48 0 1 0 369.1 437z"/></svg>
+      <span>Loading</span>
+    </div> -->
     <script src="/libs/cbor/cbor.js"></script>
     <script type="module" src="/main.js"></script>
   </body>
