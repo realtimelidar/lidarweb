@@ -39,6 +39,8 @@ export class Node {
         this.geometry.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(colorBuffer), 3, true));
         this.geometry.setAttribute('radiation', new THREE.BufferAttribute(new Float32Array(this.pointCount), 1));
 
+        this.geometry.setAttribute('lod', new THREE.BufferAttribute(new Float32Array(this.pointCount).fill(this.lod), 1));
+
         // If we already have radiation data, load it into this node
         this.updateRadiation();
 
@@ -95,6 +97,7 @@ export class Pointcloud {
                 gradientMaxValue: { value: 100.0 },
                 gradientThreshold: { value: 0.4 },
                 gradientShow: { value: 1.0 },
+                hqPoints: { value: 0.0 },
 
             },
 
@@ -105,6 +108,7 @@ export class Pointcloud {
 
             attribute vec3 color;
             attribute float radiation;
+            attribute float lod;
 
             varying vec3 vColor;
             varying float vRadiation;
@@ -140,6 +144,7 @@ export class Pointcloud {
             uniform float gradientThreshold;
             uniform float gradientMaxValue;
             uniform float gradientShow;
+            uniform float hqPoints;
 
             varying vec3 vColor;
             varying float vRadiation;
@@ -189,6 +194,15 @@ export class Pointcloud {
             }
 
             void main() {
+                if (hqPoints == 1.0) {
+                    vec2 coord = gl_PointCoord - vec2(0.5);
+                    float dist = length(coord);
+
+                    if (dist > 0.5) {
+                        discard;
+                    }
+                }
+
                 if (gradientShow == 0.0) {
                     gl_FragColor = vec4(vColor, 1.0);
                     return;

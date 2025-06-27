@@ -173,13 +173,13 @@ onmessage = e => {
             positions[i * 3 + 1] = dv.getFloat64(ppOffset + 1 * 8, littleEndian);// * 0.001 + 4571492;
             positions[i * 3 + 2] = dv.getFloat64(ppOffset + 2 * 8, littleEndian);// * 0.001 + 259;
 
-            positions[i * 3] *= 0.001;
-            positions[i * 3 + 1] *= 0.001;
-            positions[i * 3 + 2] *= 0.001;
+            // positions[i * 3] *= 0.001;
+            // positions[i * 3 + 1] *= 0.001;
+            // positions[i * 3 + 2] *= 0.001;
 
-            colors[i * 3] = dv.getUint16(pcOffset, littleEndian);//>> 8;
-            colors[i * 3 + 1] = dv.getUint16(pcOffset + 1 * 2, littleEndian);// >> 8;
-            colors[i * 3 + 2] = dv.getUint16(pcOffset + 2 * 2, littleEndian);// >> 8;
+            colors[i * 3] = dv.getUint16(pcOffset, littleEndian) >> 8;
+            colors[i * 3 + 1] = dv.getUint16(pcOffset + 1 * 2, littleEndian) >> 8;
+            colors[i * 3 + 2] = dv.getUint16(pcOffset + 2 * 2, littleEndian) >> 8;
         }
 
         result.t = 'UpdateNode';

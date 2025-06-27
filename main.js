@@ -191,8 +191,8 @@ function initRealtime() {
     // Initialize Websocket connection 
     // We will put this in a WebWorker to avoid rendering interruption
     websocketWorker = new Worker("/workers/ws.js");
-    // websocketWorker.postMessage({ t: "start", url: "wss://lidarweb.adrian.cat/ws/" });
-    websocketWorker.postMessage({ t: "start", url: "ws://127.0.0.01:3000/ws/" });
+    websocketWorker.postMessage({ t: "start", url: "wss://lidarweb.adrian.cat/ws/" });
+    // websocketWorker.postMessage({ t: "start", url: "ws://127.0.0.01:3000/ws/" });
 
     lastCameraValue = "";
 

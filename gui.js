@@ -24,6 +24,7 @@ const config = {
 
     radThreshold: 0.4,
     radMaxValue: 100,
+    hqPoints: false,
 
     loadLAS: function() {
 
@@ -193,6 +194,14 @@ export const buildGUI = function() {
 
     window.pointSizeGUI = appearance.add(config, 'pointSize', 2.0).name('Size').hide().onChange(v => {
         window.pointcloud.material.uniforms.fixedSize.value = v;
+    });
+
+    appearance.add(config, 'hqPoints', false).name('High Quality Points').onChange(v => {
+        if (v) {
+            window.pointcloud.material.uniforms.hqPoints.value = 1.0;
+        } else {
+            window.pointcloud.material.uniforms.hqPoints.value = 0.0;
+        }
     });
 
     appearance.add(config, 'showBB', false).name('Show Bounding Boxes').onChange(v => {
